@@ -16,8 +16,29 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import torch.nn as nn
 from dataclasses import dataclass
 
+import statistics
+
 # constants
 ts = 0.33   # size of test set for train/ test split
+
+"""
+Heuristic for calculating more stable functionalisation vectors:
+Takes the n_median_values median values of func_values and calculates their average.
+Takes half of func_values median values if n_median_values == -1.
+"""
+def medianFuncHeuristic(func_values: list, n_median_values: int=-1) :
+    # get default n_median_values
+    if n_median_values==-1:
+        n_median_values = int(np.ceil(len(func_values) / 2.))
+
+    # find n_median_values medians and average
+    median_average = 0.
+    for i in range(n_median_values):
+        median_value = statistics.median_high(func_values)
+        median_average += median_value / n_median_values
+        func_values.remove(median_value)
+
+    return median_average
 
 class DirectoryFuncData:
     """"
@@ -197,26 +218,36 @@ class DirectoryFuncData:
         for channel in range(0, len(self.functionalisation)):
             fid = self.functionalisation[channel]
 
-            if not failures[channel]:
-                # fid not in funcMap: zero init
-                if fid not in self.funcMap.keys():
-                    self.funcMap[fid] = 0
+            # fid not in funcMap: zero init
+            if fid not in self.funcMap.keys():
+                self.funcMap[fid] = 0
 
-                # increment # of active channels
-                self.funcMap[fid] += 1
+            # increment # of active channels
+            self.funcMap[fid] += 1
 
-        func_data = np.zeros([meas_data.shape[0], len(self.funcMap)])
+        #                                     #
+        #   convert meas_data to func_data    #
+        #                                     #
+        func_data = np.zeros([meas_data.shape[0], max(self.funcMap)+1])
 
         for row in range (0, func_data.shape[0]):
-            # sum up channels
-            for channel in range(0, 64):
-                # ignore broken channels
-                if not failures[channel]:
-                    # column: index of channels func in funcMap.keys()
-                    func = self.functionalisation[channel]
+            # create value list fo each functionalisation
+            # valueMap: dict {func id: list of values}
+            valueMap = {}
+            for channel in range(0, meas_data.shape[1]):
 
-                    # add channel value
-                    func_data[row, func] += meas_data[row, channel] / self.funcMap[func]
+                # column: index of channels func in funcMap.keys()
+                func = self.functionalisation[channel]
+
+                # add channel value
+                if not func in valueMap:
+                    valueMap[func] = [meas_data[row, channel]]
+                else:
+                    valueMap[func].append(meas_data[row, channel])
+
+            # use heuristic to determine functionalisation values
+            for func in valueMap:
+                func_data[row, func] = medianFuncHeuristic(valueMap[func])
 
         return func_data
 
