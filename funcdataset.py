@@ -6,15 +6,15 @@ from torch.utils import data
 from sklearn import preprocessing
 from sklearn.model_selection import StratifiedKFold
 from sklearn.utils import resample
-import random
 import os
-import datetime
 import time
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+import torch.nn as nn
+from dataclasses import dataclass
 
 # constants
 ts = 0.33   # size of test set for train/ test split
@@ -220,6 +220,10 @@ class DirectoryFuncData:
 
         return func_data
 
+@dataclass
+class MetaContainer:
+    classes: list
+
 class FuncDataset(data.Dataset):
     """
     Container for multiple measurements. Used to create normalised training and test dataframes based on functionalisation of the sensor.
@@ -232,12 +236,22 @@ class FuncDataset(data.Dataset):
     # test_dir == "": split loaded data into training & test set
     # -> if random_tt_directory_split is set to True, the subdirectories in data_dir will be randomly split into test & train set
     # normalise both sets based on functionalisation training set
-    def __init__(self, data_dir="data", convertToRelativeVectors=True, calculateFuncVectors=True):
+    def __init__(self, data_dir="data", convertToRelativeVectors=True, calculateFuncVectors=True, convertToMultiLabels=False, n_out_vecs=1, out_vec_steps=[], n_averaged_vecs=1):
         self.data_dir = data_dir
         self.train_dirs = []
         self.test_dirs = []
 
         self.is_relative = convertToRelativeVectors
+        self.convertToMultiLabels = convertToMultiLabels
+
+        # configurations for time series models:
+        self.n_output_vectors = n_out_vecs  # number of vectors in output for each index i
+        if not out_vec_steps or len(out_vec_steps) != len( self.n_output_vectors):   # if default out_vec_steps or invalid steps
+            self.output_vectors_steps = range(n_out_vecs)
+        else:
+            self.output_vectors_steps = out_vec_steps
+
+        self.n_averaged_vecs = n_averaged_vecs  # number of vectors averaged for each vector in output
 
         # load data from all subdirs in dir and store in directory_data_dict
         self.directory_data_dict = {}
@@ -275,6 +289,39 @@ class FuncDataset(data.Dataset):
         # scaler for normalisation
         self.scaler = preprocessing.StandardScaler(with_mean=True)
 
+        # fastai attributes
+        self.classes = self.get_classes().values()
+        self.c = len(self.classes)
+        self.y = MetaContainer(self.classes)
+#        self.loss_func = nn.CrossEntropyLoss()
+        self.loss_func = nn.CrossEntropyLoss()
+
+  #   """
+  #   cross entropy loss that takes one hot coded tensors as input
+  #   """
+  #   def __cross_entropy_one_hot(self, input, target):
+  #       _, labels = target.max(dim=0)
+  #       return nn.CrossEntropyLoss()(input, labels)
+  # #      return nn.CrossEntropyLoss()(input, target)
+
+    def get_classes(self):
+        class_dict = {}
+
+        for train_dir in self.directory_data_dict.values():
+            # get classes & their counts
+            dir_classes = np.unique(train_dir.get_classified_labels(), return_counts=True)
+
+            # add to class_dict
+            for i in range(len(dir_classes[0])):
+                class_label = dir_classes[0][i]
+                class_count = dir_classes[1][i]
+
+                if not class_label in class_dict:
+                    class_dict[class_label] = class_count
+                else:
+                    class_dict[class_label] += class_count
+
+        return class_dict
 
     """ 
     Set test_set to the classified data of the element at position index in the key list of the directory data dict.
@@ -465,10 +512,22 @@ class FuncDataset(data.Dataset):
         ID = str(index)
 
         # Load data and get label
-        X = torch.from_numpy(self.train_set[index, :])
+        X = torch.from_numpy(self.train_set[index, :]).float()
         y = self.train_classes[index]
 
+        if self.convertToMultiLabels:
+            if y == 'No Smell':
+                y = []
+            else:
+                y = [y]
+
         return X, y
+
+    def get_eval_dataset(self):
+        return EvaluationDataset(self)
+
+    def measDays(self):
+        return len(self.directory_data_dict.keys())
 
     def getPCA(self, useTrainset=True, nComponents=2):
         if useTrainset:
@@ -612,6 +671,37 @@ class FuncDataset(data.Dataset):
     def detect_probs(self, model):
         for func_data_dir in self.directory_data_dict.values():
             func_data_dir.detect_probs(model, self.label_encoder.classes_)
+
+
+class EvaluationDataset:
+    def __init__(self, dataset: FuncDataset):
+        self.dataset = dataset
+        # fastai attributes
+        self.classes = dataset.classes
+        self.c = dataset.c
+        self.loss_func = dataset.loss_func
+
+    def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.dataset.test_set)
+
+    def __getitem__(self, index):
+        'Generates one sample of data'
+        # Select sample
+        ID = str(index)
+
+        # Load data and get label
+        X = torch.from_numpy(self.dataset.test_set[index, :]).float()
+
+        y = self.dataset.test_classes[index]
+
+        if self.dataset.convertToMultiLabels:
+            if y == 'No Smell':
+                y = []
+            else:
+                y = [y]
+
+        return X, y
 
 class MeasIterator:
     """

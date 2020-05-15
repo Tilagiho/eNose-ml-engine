@@ -14,7 +14,7 @@ n_epochs = 100
 learning_rate = 0.03
 test_step = 2   # each test_step epochs the test stats are calculated
 
-training_data = 'data/eNose 200122 - Timo/Zelle/dataset_0403_full'  # string or list of strings
+training_data = 'data/dataset_0403_full'  # string or list of strings
 calculateFuncVectors = True
 convertToRelativeVectors = True
 normaliseData = True
