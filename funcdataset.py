@@ -288,6 +288,10 @@ class FuncDataset(data.Dataset):
         self.directory_data_dict = {}
 
         for element in os.listdir(data_dir):
+            # ignore hidden directories
+            if element.startswith("."):
+                continue
+
             path = data_dir + "/" + element
 
             # path is sub-folder: recurse load_data with sub-folder
