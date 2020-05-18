@@ -2,8 +2,6 @@
 # training script for data annotated by the eNoseAnnotator
 
 from funcdataset import *
-import linear_classifier
-import oneHidden_reluAct_net
 
 import natsort
 
@@ -37,23 +35,6 @@ hidden_layer_width = 8
 max_epochs = 100
 batch_size = 8
 
-#                   #
-#       models      #
-#                   #
-def create_model(model_name, dataset, cv_index):
-    switcher={
-        'linear':linear_classifier.LinearNetwork(dataset.full_data.shape[1], dataset.label_encoder.classes_,
-                                name= model_name + "_" + str(cv_index),
-                                mean=dataset.scaler.mean_, variance=dataset.scaler.var_,
-                                isInputAbsolute=not dataset.is_relative),
-        'simple_nn':oneHidden_reluAct_net.OneHiddenNetwork(dataset.full_data.shape[1], dataset.label_encoder.classes_,
-                                name= model_name + "_" + str(cv_index),
-                                mean=dataset.scaler.mean_, variance=dataset.scaler.var_,
-                                isInputAbsolute=not dataset.is_relative,
-                                nHidden=hidden_layer_width)
-    }
-
-    return switcher.get(model_name)
 
 #                       #
 #   training script     #
