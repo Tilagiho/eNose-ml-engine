@@ -8,6 +8,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.utils import resample
 import os
 import time
+from typing import Iterable
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -373,7 +374,7 @@ class FuncDataset(data.Dataset):
     Split all classified vectors & their correspnding label into train & test set based on train_dirs & test_dirs.
     All dir names in train_dirs and test_dirs should be contained in self.directory_data_dict.
     """
-    def setDirSplit(self, train_dirs, test_dirs, normaliseData=True, balanceDatasets=True):
+    def setDirSplit(self, train_dirs: Iterable[str], test_dirs: Iterable[str], normaliseData=True, balanceDatasets=True):
         self.train_dirs = train_dirs
         self.test_dirs = test_dirs
 
@@ -382,7 +383,9 @@ class FuncDataset(data.Dataset):
         train_label_list = []
         for train_dir in train_dirs:
             if not self.directory_data_dict.__contains__(train_dir):
-                raise ValueError(train_dir + " is not in the directory data dict!")
+                train_dir = self.data_dir + "/" + train_dir
+                if not self.directory_data_dict.__contains__(train_dir):
+                    raise ValueError(train_dir + " is not in the directory data dict!")
 
             train_data_list.append(self.directory_data_dict[train_dir].get_classified_data())
             train_label_list.append(self.directory_data_dict[train_dir].get_classified_labels())
@@ -395,7 +398,9 @@ class FuncDataset(data.Dataset):
         test_label_list = []
         for test_dir in test_dirs:
             if not self.directory_data_dict.__contains__(test_dir):
-                raise ValueError(test_dir + " is not in the directory data dict!")
+                test_dir = self.data_dir + "/" + test_dir
+                if not self.directory_data_dict.__contains__(test_dir):
+                    raise ValueError(test_dir + " is not in the directory data dict!")
 
             test_data_list.append(self.directory_data_dict[test_dir].get_classified_data())
             test_label_list.append(self.directory_data_dict[test_dir].get_classified_labels())

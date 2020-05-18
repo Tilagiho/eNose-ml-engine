@@ -5,7 +5,7 @@ import oneHidden_reluAct_net
 #                   #
 #       models      #
 #                   #
-def create_model(model_name, dataset):
+def create_model(model_name, dataset, hidden_layer_width=8):
     switcher={
         'linear':linear_classifier.LinearNetwork(dataset.full_data.shape[1], dataset.label_encoder.classes_,
                                 name= model_name,
