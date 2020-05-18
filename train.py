@@ -10,8 +10,7 @@ import natsort
 from torch.utils.data import DataLoader
 
 from fastai.basic_data import DataBunch
-import fastai
-import fastai.basic_train as train
+
 import fastai.metrics as metrics
 import fastai.vision as vision
 import fastai.callbacks as callbacks
