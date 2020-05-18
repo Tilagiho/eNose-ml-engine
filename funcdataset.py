@@ -8,7 +8,8 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.utils import resample
 import os
 import time
-from typing import Iterable
+
+from  typing import List
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -145,9 +146,7 @@ class DirectoryFuncData:
             if base_vector_time > vector_time:
                 break
             base_vector = bv[1:]
-        # debug
-        if len(vector) != 64 or len(base_vector) != 64:
-            a = 1
+
         # calculate relative channel values in %
         relative_vector = np.zeros_like(vector)
         for i in range(vector.shape[0]):
@@ -299,17 +298,6 @@ class FuncDataset(data.Dataset):
             if os.path.isdir(path):
                 self.directory_data_dict[path] = DirectoryFuncData(path, convertToRelativeVectors, calculateFuncVectors)
 
-        # get classes of classified data & convert into numeric labels
-        label_set = []
-
-        for directory_data in self.directory_data_dict.values():
-            for label in directory_data.get_classified_labels():
-                if not label_set.__contains__(label):
-                    label_set.append(label)
-
-        self.label_encoder = preprocessing.LabelEncoder()
-        self.label_encoder.fit(label_set)
-
         # zero init train & test set + labels
         self.train_set = np.zeros(0)
         self.test_set = np.zeros(0)
@@ -326,11 +314,22 @@ class FuncDataset(data.Dataset):
         self.scaler = preprocessing.StandardScaler(with_mean=True)
 
         # fastai attributes
-        self.classes = self.get_classes().values()
+        self.classes = list(self.get_classes().keys())
+
+        # if multi-hot encoding is used:
+        # remove "No Smell" class from classes
+        if (convertToMultiLabels):
+            self.classes.remove("No Smell")
         self.c = len(self.classes)
         self.y = MetaContainer(self.classes)
-#        self.loss_func = nn.CrossEntropyLoss()
-        self.loss_func = nn.CrossEntropyLoss()
+        if not convertToMultiLabels:
+            self.loss_func = nn.CrossEntropyLoss()
+        else:
+            self.loss_func = nn.BCEWithLogitsLoss()
+
+        # convert classes into numeric labels
+        self.label_encoder = preprocessing.LabelEncoder()
+        self.label_encoder.fit(self.classes)
 
   #   """
   #   cross entropy loss that takes one hot coded tensors as input
@@ -374,7 +373,7 @@ class FuncDataset(data.Dataset):
     Split all classified vectors & their correspnding label into train & test set based on train_dirs & test_dirs.
     All dir names in train_dirs and test_dirs should be contained in self.directory_data_dict.
     """
-    def setDirSplit(self, train_dirs: Iterable[str], test_dirs: Iterable[str], normaliseData=True, balanceDatasets=True):
+    def setDirSplit(self, train_dirs: List[str], test_dirs: List[str], normaliseData=True, balanceDatasets=True):
         self.train_dirs = train_dirs
         self.test_dirs = test_dirs
 
@@ -408,9 +407,7 @@ class FuncDataset(data.Dataset):
         self.test_set = np.concatenate(test_data_list)
         self.test_classes = np.concatenate(test_label_list)
 
-        # convert class names into numeric labels
-        self.train_classes = torch.from_numpy(self.label_encoder.transform(self.train_classes)).long()
-        self.test_classes = torch.from_numpy(self.label_encoder.transform(self.test_classes)).long()
+        self.convert_class_labels()
 
         if normaliseData:
             self.normalise_data()
@@ -451,19 +448,18 @@ class FuncDataset(data.Dataset):
         # get split indexes for index
         i=0
         for (train_index, test_index) in self.skf.split(self.data, self.labels):
-            # debug
-            print(test_index)
-
             if i == index:
                 break
 
             i += 1
 
         # set train & test set based on indexes
-        self.train_set = torch.from_numpy(self.data[train_index]).long()
-        self.train_classes = torch.from_numpy(self.label_encoder.transform(self.labels[train_index])).long()
-        self.test_set = torch.from_numpy(self.data[test_index]).long()
-        self.test_classes = torch.from_numpy(self.label_encoder.transform(self.labels[test_index])).long()
+        self.train_set = self.data[train_index]
+        self.train_classes = self.labels[train_index]
+        self.test_set = self.data[test_index]
+        self.test_classes = self.labels[test_index]
+
+        self.convert_class_labels()
 
         if normaliseData:
             self.normalise_data()
@@ -491,21 +487,46 @@ class FuncDataset(data.Dataset):
         self.full_data = self.scaler.transform(np.concatenate(data_list))
 
     def balance_datasets(self):
-        # balance training dataset:
+        # balance training & test dataset:
+        datasets = []
+
         training_class_sets = []
         upsampled_training_class_sets = []
+        train_labels = []
 
-        # create list of samples for each class
-        for label in range(len(self.label_encoder.classes_)):
-            training_class_sets.append(self.train_set[self.train_classes == label])
+        # single class label:
+        # get set of vectors for each class
+        # all vectors only have one label
+        if not self.convertToMultiLabels:
+            # create list of samples for each class
+            for label in range(self.c):
+                training_class_sets.append(self.train_set[self.train_classes == label])
+                train_labels.append(label)
+        # multi class labels:
+        # get set of vectors for each class
+        # vectors with multiple labels are added to multiple sets
+        else:
+            # class "No Smell": empty vector
+            na_class_vector = torch.zeros(1, self.c)
+            training_class_sets.append(self.train_set[(self.train_classes == na_class_vector).all(1)])
+            train_labels.append(na_class_vector)
+
+            # all other classes
+            for i in range(self.c):
+                label = torch.tensor([i])
+                label.unsqueeze_(0)
+                class_vector = torch.zeros(1, self.c).scatter(1, label, 1)
+
+                training_class_sets.append(self.train_set[torch.eq(self.train_classes, class_vector).numpy()[:, i]])
+                train_labels.append(class_vector)
 
         # get max number of samples
         # n_training_samples = max([class_set.shape[0] for class_set in training_class_sets])
         n_training_samples = int(np.median([class_set.shape[0] for class_set in training_class_sets]))
 
         # upsample samples for each class to n_training_samples
-        for label in range(len(self.label_encoder.classes_)):
-            resampled_set = resample(training_class_sets[label],
+        for (i, label) in enumerate(train_labels):
+            resampled_set = resample(training_class_sets[i],
                                  #replace=True,     # sample with replacement
                                  n_samples=n_training_samples,    # to match majority class
                                  random_state=123) # reproducible results
@@ -513,15 +534,39 @@ class FuncDataset(data.Dataset):
 
         # update training_data & training_classes with upsampled sets
         self.train_set = np.concatenate(upsampled_training_class_sets)
-        self.train_classes = torch.from_numpy(np.concatenate([np.repeat(label, n_training_samples) for label in range(len(self.label_encoder.classes_))]))
+        self.train_classes = torch.from_numpy(np.concatenate([np.repeat(label, n_training_samples, axis=0) for label in train_labels]))
 
         # balance training dataset:
         test_class_sets = []
         resampled_test_class_sets = []
+        test_labels = []
 
-        # create list of samples for each class
-        for label in range(len(self.label_encoder.classes_)):
-            test_class_sets.append(self.test_set[self.test_classes == label])
+        # single class label:
+        # get set of vectors for each class
+        # all vectors only have one label
+        if not self.convertToMultiLabels:
+            # create list of samples for each class
+            for label in range(len(self.label_encoder.classes_)):
+                test_class_sets.append(self.test_set[self.test_classes == label])
+                test_labels.append(label)
+                # multi class labels:
+                # get set of vectors for each class
+                # vectors with multiple labels are added to multiple sets
+        else:
+            # class "No Smell": empty vector
+            na_class_vector = torch.zeros(1, self.c)
+
+            test_class_sets.append(self.test_set[(self.test_classes == na_class_vector).all(1)])
+            test_labels.append(na_class_vector)
+
+            # all other classes
+            for i in range(self.c):
+                label = torch.tensor([i])
+                label.unsqueeze_(0)
+                class_vector = torch.zeros(1, self.c).scatter(1, label, 1)
+
+                test_class_sets.append(self.test_set[torch.eq(self.test_classes, class_vector).numpy()[:, i]])
+                test_labels.append(class_vector)
 
         # get max number of samples
         n_test_samples = int(np.median([class_set.shape[0] for class_set in test_class_sets]))
@@ -529,18 +574,52 @@ class FuncDataset(data.Dataset):
 
         # resample samples for each class to n_training_samples
         label_list = []
-        for label in range(len(self.label_encoder.classes_)):
-            if test_class_sets[label].shape[0] > 0:
-                resampled_set = resample(test_class_sets[label],
+        for (i, label) in enumerate(test_labels):
+            if test_class_sets[i].shape[0] > 0:
+                resampled_set = resample(test_class_sets[i],
 #                                    replace=True,     # sample with replacement
                                      n_samples=n_test_samples,    # to match median class
                                      random_state=123) # reproducible results
                 resampled_test_class_sets.append(resampled_set)
-                label_list.append(np.repeat(label, n_test_samples))
+                label_list.append(np.repeat(label, n_test_samples, axis=0))
 
         # update training_data & training_classes with upsampled sets
         self.test_set = np.concatenate(resampled_test_class_sets)
         self.test_classes = torch.from_numpy(np.concatenate(label_list)).long()
+
+    def convert_class_labels(self):
+        '''convert self.train_classes & self.test_classes into tensors usable for training'''
+        # convertToMultiLabels not set:
+        # create class labels
+        # don't expect multiple classes
+        if not self.convertToMultiLabels:
+            # convert class names into numeric labels
+            self.train_classes = torch.from_numpy(self.label_encoder.transform(self.train_classes)).long()
+            self.test_classes = torch.from_numpy(self.label_encoder.transform(self.test_classes)).long()
+        # convertToMultiLabels not set:
+        # create multi-hot encoded labels
+        else:
+            tensors = []
+            for class_set in [self.train_classes, self.test_classes]:
+                tensor = torch.zeros(class_set.shape[0], self.c)
+                tensors.append(tensor)
+                for i in range(class_set.shape[0]):
+                    # split into class list from AnnotationString & convert into tensor with list of classlabels
+                    class_labels = class_set[i].split(",")
+                    # remove "No Smell" labels
+                    if "No Smell" in class_labels:
+                        class_labels.remove("No Smell")
+                    class_label_tensor = torch.tensor(self.label_encoder.transform(class_labels))
+
+                    # create multi-hot encoded tensor
+                    class_label_tensor.unsqueeze_(0)
+                    a = torch.zeros(class_label_tensor.size(0), self.c)
+                    b = a.scatter(1, class_label_tensor, 1)
+                    tensor[i] = torch.zeros(class_label_tensor.size(0), self.c).scatter(1, class_label_tensor, 1)
+
+            self.train_classes = tensors[0].long()
+            self.test_classes = tensors[1].long()
+
 
     def __len__(self):
         'Denotes the total number of samples'
@@ -554,12 +633,6 @@ class FuncDataset(data.Dataset):
         # Load data and get label
         X = torch.from_numpy(self.train_set[index, :]).float()
         y = self.train_classes[index]
-
-        if self.convertToMultiLabels:
-            if y == 'No Smell':
-                y = []
-            else:
-                y = [y]
 
         return X, y
 
@@ -732,14 +805,7 @@ class EvaluationDataset:
 
         # Load data and get label
         X = torch.from_numpy(self.dataset.test_set[index, :]).float()
-
         y = self.dataset.test_classes[index]
-
-        if self.dataset.convertToMultiLabels:
-            if y == 'No Smell':
-                y = []
-            else:
-                y = [y]
 
         return X, y
 
@@ -820,3 +886,8 @@ class MeasIterator:
         timestamp = dataframe.iloc[self.i_vector, 0]
         return timestamp
 
+if __name__ == "__main__":
+    dataset = FuncDataset(data_dir='data/eNose-base-dataset',
+                          convertToRelativeVectors=True, calculateFuncVectors=True,
+                          convertToMultiLabels=True)
+    dataset.setDirSplit(["train"], ["validate"])

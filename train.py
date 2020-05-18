@@ -2,6 +2,7 @@
 # training script for data annotated by the eNoseAnnotator
 
 from funcdataset import *
+import models
 
 import natsort
 
@@ -19,7 +20,7 @@ import fastai.basic_train as basic_train
 #   settings    #
 #               #
 # data settings
-training_data = 'data/dataset_0403_full'  # string or list of strings
+training_data = 'data/eNose-base-dataset'  # string or list of strings
 calculate_func_vectors = True
 convert_to_relative_vectors = True
 normalise_data = True
@@ -73,7 +74,7 @@ for cv_index in range(dataset.measDays()):
     dataset.setLooSplit(cv_index, normalise_data, balance_datasets)
 
     # init model
-    model = create_model(model_type, dataset, cv_index)
+    model = models.create_model(model_type, dataset)
     # model.eval()
 
     # create fastai databunch
