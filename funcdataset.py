@@ -585,7 +585,7 @@ class FuncDataset(data.Dataset):
 
         # update training_data & training_classes with upsampled sets
         self.test_set = np.concatenate(resampled_test_class_sets)
-        self.test_classes = torch.from_numpy(np.concatenate(label_list)).long()
+        self.test_classes = torch.from_numpy(np.concatenate(label_list)).float()
 
     def convert_class_labels(self):
         '''convert self.train_classes & self.test_classes into tensors usable for training'''
@@ -594,8 +594,8 @@ class FuncDataset(data.Dataset):
         # don't expect multiple classes
         if not self.convertToMultiLabels:
             # convert class names into numeric labels
-            self.train_classes = torch.from_numpy(self.label_encoder.transform(self.train_classes)).long()
-            self.test_classes = torch.from_numpy(self.label_encoder.transform(self.test_classes)).long()
+            self.train_classes = torch.from_numpy(self.label_encoder.transform(self.train_classes)).float()
+            self.test_classes = torch.from_numpy(self.label_encoder.transform(self.test_classes)).float()
         # convertToMultiLabels not set:
         # create multi-hot encoded labels
         else:
@@ -615,8 +615,8 @@ class FuncDataset(data.Dataset):
                     class_label_tensor.unsqueeze_(0)
                     tensor[i] = torch.zeros(class_label_tensor.size(0), self.c).scatter(1, class_label_tensor, 1)
 
-            self.train_classes = tensors[0].long()
-            self.test_classes = tensors[1].long()
+            self.train_classes = tensors[0].float()
+            self.test_classes = tensors[1].float()
 
 
     def __len__(self):
@@ -630,7 +630,7 @@ class FuncDataset(data.Dataset):
 
         # Load data and get label
         X = torch.from_numpy(self.train_set[index, :]).float()
-        y = self.train_classes[index]
+        y = self.train_classes[index].float()
 
         return X, y
 
@@ -803,7 +803,7 @@ class EvaluationDataset:
 
         # Load data and get label
         X = torch.from_numpy(self.dataset.test_set[index, :]).float()
-        y = self.dataset.test_classes[index]
+        y = self.dataset.test_classes[index].float()
 
         return X, y
 
