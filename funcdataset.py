@@ -609,12 +609,10 @@ class FuncDataset(data.Dataset):
                     # remove "No Smell" labels
                     if "No Smell" in class_labels:
                         class_labels.remove("No Smell")
-                    class_label_tensor = torch.tensor(self.label_encoder.transform(class_labels))
+                    class_label_tensor = torch.LongTensor(self.label_encoder.transform(class_labels))
 
                     # create multi-hot encoded tensor
                     class_label_tensor.unsqueeze_(0)
-                    a = torch.zeros(class_label_tensor.size(0), self.c)
-                    b = a.scatter(1, class_label_tensor, 1)
                     tensor[i] = torch.zeros(class_label_tensor.size(0), self.c).scatter(1, class_label_tensor, 1)
 
             self.train_classes = tensors[0].long()
@@ -885,6 +883,7 @@ class MeasIterator:
         dataframe = self.dirData.get_dataframes()[self.i_file]
         timestamp = dataframe.iloc[self.i_vector, 0]
         return timestamp
+
 
 if __name__ == "__main__":
     dataset = FuncDataset(data_dir='data/eNose-base-dataset',
