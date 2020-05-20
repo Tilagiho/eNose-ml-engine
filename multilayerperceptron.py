@@ -4,7 +4,7 @@ import torch.nn as nn
 import math
 
 class MultiLayerPerceptron(nn.Module):
-    def __init__(self, nFuncs, classList, isInputAbsolute = False , name ="MultiLayerPerceptron", mean=[], variance=[], nHiddenLayers=0, nHiddenNeuronPerLayer=0):
+    def __init__(self, nFuncs, classList, isInputAbsolute = False , name ="MultiLayerPerceptron", mean=[], variance=[], nHiddenLayers=0, nHiddenNeuronPerLayer=0, loss_func=None):
         super (MultiLayerPerceptron, self).__init__()
 
         # list of class names
@@ -55,8 +55,8 @@ class MultiLayerPerceptron(nn.Module):
             # hidden layer -> output layer
             self.networkFunctions.append(nn.Linear(in_features=self.nHiddenNeuronPerLayer, out_features=self.M, bias=True))
 
-        # criterion + optimizer
-        self.criterion = nn.CrossEntropyLoss()
+        # loss function
+        self.loss_func = loss_func
 
     def forward(self, vector):
         for func in self.networkFunctions:
@@ -68,7 +68,7 @@ class MultiLayerPerceptron(nn.Module):
     # output: network output of batch
     # target: target class of batch
     def loss(self, output, target):
-        return self.criterion(output, target)
+        return self.loss_func(output, target)
 
     # step:
     # forward batch through network, calculate loss & and update weigths

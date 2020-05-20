@@ -20,7 +20,8 @@ def create_model(model_name, dataset, nHiddenLayers=0):
                                 name= model_name,
                                 mean=dataset.scaler.mean_, variance=dataset.scaler.var_,
                                 isInputAbsolute=not dataset.is_relative,
-                               nHiddenLayers=nHiddenLayers)
+                                nHiddenLayers=nHiddenLayers,
+                                loss_func=loss_func)
     }
 
     return switcher.get(model_name)
