@@ -34,7 +34,7 @@ class MultiLayerPerceptron(nn.Module):
         self.nHiddenLayers = nHiddenLayers
 
         # define network
-        self.networkFunctions = []
+        self.networkFunctions = nn.ModuleList()
 
         # no hidden layers:
         # fully connected linear net
