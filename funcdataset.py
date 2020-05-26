@@ -9,7 +9,7 @@ from sklearn.utils import resample
 import os
 import time
 
-from  typing import List
+from typing import List
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
