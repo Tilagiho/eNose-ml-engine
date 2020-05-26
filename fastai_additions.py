@@ -81,3 +81,37 @@ class MultiLabelClassificationInterpretation(Interpretation):
         plt.xlabel('Predicted')
         plt.grid(False)
         if ifnone(return_fig, defaults.return_fig): return fig
+
+
+class MultiLabelExactMatch(Callback):
+    "Wrap a `func` in a callback for metrics computation."
+    def __init__(self, thresh=0.3, sigmoid=True):
+        # If it's a partial, use func.func
+        # self.name = 'exact_match'
+        self.thresh, self.sigmoid = thresh, sigmoid
+
+    def on_epoch_begin(self, **kwargs):
+        "Set the inner value to 0."
+        self.n_exact_matches, self.count = 0., 0.
+
+    def on_batch_end(self, last_output, last_target, **kwargs):
+        "Update metric computation with `last_output` and `last_target`."
+        pred, targ = ((last_output.sigmoid() if self.sigmoid else last_output) > self.thresh).byte(), last_target.byte()
+
+        for i in range(targ.shape[0]):
+            if (pred[i] == targ[i]).all():
+                self.n_exact_matches += 1
+
+        self.count += targ.shape[0]
+
+        # if not is_listy(last_target): last_target = [last_target]
+        # increment count of total examples
+        # self.count += last_target[0].size(0)
+
+        #
+        # val = self.func(last_output, *last_target)
+        # self.val += last_target[0].size(0) * val.detach().cpu()
+
+    def on_epoch_end(self, last_metrics, **kwargs):
+        "Set the final result in `last_metrics`."
+        return add_metrics(last_metrics, torch.tensor(self.n_exact_matches / self.count))
