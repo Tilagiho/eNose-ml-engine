@@ -179,22 +179,27 @@ class MultiLabelPrecision(Callback):
         return add_metrics(last_metrics, precision)
 
 
-class TrainAnalyser():
-    def __init__(self, filename: str):
-        self.df = pandas.read_csv(filename)
+class TrainAnalyser:
+    def __init__(self, modelname: str):
+        self.modelname = modelname
+        self.df = pandas.read_csv('models/' + modelname + '.csv')
 
     def plot_metrics(self):
         fig, (ax1, ax2) = plt.subplots(2, 1)
+
+        fig.suptitle(self.modelname)
 
         # go through metrics
         for i in range(3, self.df.shape[1]-1):
             ax1.plot(self.df.iloc[:, i], label=self.df.columns[i])
 
         ax1.legend()
+        ax1.set_ylim(0., 1.)
 
         for i in range(1, 3):
             ax2.plot(self.df.iloc[:, i], label=self.df.columns[i])
 
         ax2.legend()
+        ax2.set_xlabel('epoch')
 
         return fig
