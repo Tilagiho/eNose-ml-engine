@@ -8,6 +8,7 @@ from sklearn.metrics import multilabel_confusion_matrix
 
 from fastai.train import *
 
+import pandas
 
 class MultiLabelClassificationInterpretation(Interpretation):
     "Interpretation methods fpr multi-label classification models."
@@ -116,8 +117,9 @@ class MultiLabelExactMatch(Callback):
         "Set the final result in `last_metrics`."
         return add_metrics(last_metrics, torch.tensor(self.n_exact_matches / self.count))
 
+
 class MultiLabelRecall(Callback):
-    _order = -20
+    _order = -30
 
     def __init__(self, eps=1e-15, thresh=0.3, sigmoid=True, average="micro"):
         self.eps, self.thresh, self.sigmoid, self.average = eps, thresh, sigmoid, average
@@ -146,7 +148,7 @@ class MultiLabelRecall(Callback):
 
 
 class MultiLabelPrecision(Callback):
-    _order = -20
+    _order = -25
 
     def __init__(self, eps=1e-15, thresh=0.3, sigmoid=True, average="micro"):
         self.eps, self.thresh, self.sigmoid, self.average= eps, thresh, sigmoid, average
@@ -175,3 +177,24 @@ class MultiLabelPrecision(Callback):
             raise Exception("Choose one of the average types: [micro, macro]")
 
         return add_metrics(last_metrics, precision)
+
+
+class TrainAnalyser():
+    def __init__(self, filename: str):
+        self.df = pandas.read_csv(filename)
+
+    def plot_metrics(self):
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+
+        # go through metrics
+        for i in range(3, self.df.shape[1]-1):
+            ax1.plot(self.df.iloc[:, i], label=self.df.columns[i])
+
+        ax1.legend()
+
+        for i in range(1, 3):
+            ax2.plot(self.df.iloc[:, i], label=self.df.columns[i])
+
+        ax2.legend()
+
+        return fig
