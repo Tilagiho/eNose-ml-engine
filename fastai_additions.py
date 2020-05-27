@@ -115,3 +115,63 @@ class MultiLabelExactMatch(Callback):
     def on_epoch_end(self, last_metrics, **kwargs):
         "Set the final result in `last_metrics`."
         return add_metrics(last_metrics, torch.tensor(self.n_exact_matches / self.count))
+
+class MultiLabelRecall(Callback):
+    _order = -20
+
+    def __init__(self, eps=1e-15, thresh=0.3, sigmoid=True, average="micro"):
+        self.eps, self.thresh, self.sigmoid, self.average = eps, thresh, sigmoid, average
+
+    def on_epoch_begin(self, **kwargs):
+        self.tp, self.total_pred, self.total_targ = 0, 0, 0
+
+    def on_batch_end(self, last_output, last_target, **kwargs):
+        pred, targ = ((last_output.sigmoid() if self.sigmoid else last_output) > self.thresh).byte(), last_target.byte()
+        m = pred * targ
+        self.tp += m.sum(0).float()
+        self.total_pred += pred.sum(0).float()
+        self.total_targ += targ.sum(0).float()
+
+    def on_epoch_end(self, last_metrics, **kwargs):
+        self.total_pred += self.eps
+        self.total_targ += self.eps
+        if self.average == "micro":
+            recall = self.tp.sum() / self.total_targ.sum()
+        elif self.average == "macro":
+            recall = self.tp / self.total_targ.mean()
+        else:
+            raise Exception("Choose one of the average types: [micro, macro]")
+
+        return add_metrics(last_metrics, recall)
+
+
+class MultiLabelPrecision(Callback):
+    _order = -20
+
+    def __init__(self, eps=1e-15, thresh=0.3, sigmoid=True, average="micro"):
+        self.eps, self.thresh, self.sigmoid, self.average= eps, thresh, sigmoid, average
+
+    def on_epoch_begin(self, **kwargs):
+        self.tp, self.total_pred, self.total_targ = 0, 0, 0
+
+    def on_batch_end(self, last_output, last_target, **kwargs):
+        pred, targ = ((last_output.sigmoid() if self.sigmoid else last_output) > self.thresh).byte(), last_target.byte()
+        m = pred * targ
+        self.tp += m.sum(0).float()
+        self.total_pred += pred.sum(0).float()
+        self.total_targ += targ.sum(0).float()
+
+    def on_epoch_end(self, last_metrics, **kwargs):
+        self.total_pred += self.eps
+        self.total_targ += self.eps
+        if self.average == "micro":
+            precision = self.tp.sum() / self.total_pred.sum()
+        elif self.average == "macro":
+            precision = self.tp / self.total_pred
+        elif self.average == "weighted":
+            precision = self.tp / self.total_pred
+
+        else:
+            raise Exception("Choose one of the average types: [micro, macro]")
+
+        return add_metrics(last_metrics, precision)
