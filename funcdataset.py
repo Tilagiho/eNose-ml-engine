@@ -133,6 +133,10 @@ class DirectoryFuncData:
 
         return relative_arrays
 
+    def rename_class(self, old_name: str, new_name: str):
+        for labels in self.label_list:
+            labels[labels == old_name] = new_name
+
     @staticmethod
     def get_relative_vector(vector, base_vector_list, timestamp):
         format = '%d.%m.%Y - %H:%M:%S'
@@ -313,7 +317,13 @@ class FuncDataset(data.Dataset):
         # scaler for normalisation
         self.scaler = preprocessing.StandardScaler(with_mean=True)
 
-        # fastai attributes
+        # loss function
+        if not convertToMultiLabels:
+            self.loss_func = nn.CrossEntropyLoss()
+        else:
+            self.loss_func = nn.BCEWithLogitsLoss()
+
+        # fastai attributes:
         self.classes = list(self.get_classes().keys())
 
         # if multi-hot encoding is used:
@@ -322,10 +332,6 @@ class FuncDataset(data.Dataset):
             self.classes.remove("No Smell")
         self.c = len(self.classes)
         self.y = MetaContainer(self.classes)
-        if not convertToMultiLabels:
-            self.loss_func = nn.CrossEntropyLoss()
-        else:
-            self.loss_func = nn.BCEWithLogitsLoss()
 
         # convert classes into numeric labels
         self.label_encoder = preprocessing.LabelEncoder()
@@ -586,6 +592,28 @@ class FuncDataset(data.Dataset):
         # update training_data & training_classes with upsampled sets
         self.test_set = np.concatenate(resampled_test_class_sets)
         self.test_classes = torch.from_numpy(np.concatenate(label_list)).float()
+
+    def delete_class(self, classname):
+        self.rename_class(classname, "")
+
+    def rename_class(self, old_name: str, new_name: str):
+        # rename labels in directory_datas
+        for directory_data in self.directory_data_dict.values():
+            directory_data.rename_class(old_name, new_name)
+
+        # update fastai attributes
+        self.classes = list(self.get_classes().keys())
+
+        # if multi-hot encoding is used:
+        # remove "No Smell" class from classes
+        if self.convertToMultiLabels:
+            self.classes.remove("No Smell")
+        self.c = len(self.classes)
+        self.y = MetaContainer(self.classes)
+
+        # convert classes into numeric labels
+        self.label_encoder = preprocessing.LabelEncoder()
+        self.label_encoder.fit(self.classes)
 
     def convert_class_labels(self):
         '''convert self.train_classes & self.test_classes into tensors usable for training'''
