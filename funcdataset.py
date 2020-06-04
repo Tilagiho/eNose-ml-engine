@@ -304,9 +304,9 @@ class FuncDataset(data.Dataset):
 
         # zero init train & test set + labels
         self.train_set = np.zeros(0)
-        self.test_set = np.zeros(0)
+        self.valid_set = np.zeros(0)
         self.train_classes = torch.zeros(0)
-        self.test_classes = torch.zeros(0)
+        self.valid_classes = torch.zeros(0)
 
         # init full data
         data_list = []
@@ -345,22 +345,38 @@ class FuncDataset(data.Dataset):
   #       return nn.CrossEntropyLoss()(input, labels)
   # #      return nn.CrossEntropyLoss()(input, target)
 
-    def get_classes(self):
+    def get_classes(self, dataset_type:str='original'):
         class_dict = {}
 
-        for train_dir in self.directory_data_dict.values():
-            # get classes & their counts
-            dir_classes = np.unique(train_dir.get_classified_labels(), return_counts=True)
+        # 'original': get classes from the unaltered dataset
+        if dataset_type is 'original':
+            for train_dir in self.directory_data_dict.values():
+                # get classes & their counts
+                dir_classes = np.unique(train_dir.get_classified_labels(), return_counts=True)
 
-            # add to class_dict
-            for i in range(len(dir_classes[0])):
-                class_label = dir_classes[0][i]
-                class_count = dir_classes[1][i]
+                # add to class_dict
+                for i in range(len(dir_classes[0])):
+                    class_label = dir_classes[0][i]
+                    class_count = dir_classes[1][i]
 
-                if not class_label in class_dict:
-                    class_dict[class_label] = class_count
-                else:
-                    class_dict[class_label] += class_count
+                    if not class_label in class_dict:
+                        class_dict[class_label] = class_count
+                    else:
+                        class_dict[class_label] += class_count
+        # 'valid': get classes of the validation dataset
+        elif dataset_type is 'valid':
+            classes = np.unique(self.valid_classes, return_counts=True)
+
+            for i in range(len(classes[0])):
+                class_dict[classes[0][i]] = classes[1][i]
+        # 'train': get classes of the training dataset
+        elif dataset_type is 'train':
+            classes = np.unique(self.train_classes, return_counts=True)
+
+            for i in range(len(classes[0])):
+                class_dict[classes[0][i]] = classes[1][i]
+        else:
+            raise NotImplementedError
 
         return class_dict
 
@@ -410,8 +426,8 @@ class FuncDataset(data.Dataset):
             test_data_list.append(self.directory_data_dict[test_dir].get_classified_data())
             test_label_list.append(self.directory_data_dict[test_dir].get_classified_labels())
 
-        self.test_set = np.concatenate(test_data_list)
-        self.test_classes = np.concatenate(test_label_list)
+        self.valid_set = np.concatenate(test_data_list)
+        self.valid_classes = np.concatenate(test_label_list)
 
         self.convert_class_labels()
 
@@ -462,8 +478,8 @@ class FuncDataset(data.Dataset):
         # set train & test set based on indexes
         self.train_set = self.data[train_index]
         self.train_classes = self.labels[train_index]
-        self.test_set = self.data[test_index]
-        self.test_classes = self.labels[test_index]
+        self.valid_set = self.data[test_index]
+        self.valid_classes = self.labels[test_index]
 
         self.convert_class_labels()
 
@@ -483,7 +499,7 @@ class FuncDataset(data.Dataset):
 
         # apply normalisation to training, test & full data
         self.train_set = self.scaler.transform(self.train_set)
-        self.test_set = self.scaler.transform(self.test_set)
+        self.valid_set = self.scaler.transform(self.valid_set)
 
         # full data
         data_list = []
@@ -553,7 +569,7 @@ class FuncDataset(data.Dataset):
         if not self.convertToMultiLabels:
             # create list of samples for each class
             for label in range(len(self.label_encoder.classes_)):
-                test_class_sets.append(self.test_set[self.test_classes == label])
+                test_class_sets.append(self.valid_set[self.valid_classes == label])
                 test_labels.append(label)
                 # multi class labels:
                 # get set of vectors for each class
@@ -562,7 +578,7 @@ class FuncDataset(data.Dataset):
             # class "No Smell": empty vector
             na_class_vector = torch.zeros(1, self.c)
 
-            test_class_sets.append(self.test_set[(self.test_classes == na_class_vector).all(1)])
+            test_class_sets.append(self.valid_set[(self.valid_classes == na_class_vector).all(1)])
             test_labels.append(na_class_vector)
 
             # all other classes
@@ -571,7 +587,7 @@ class FuncDataset(data.Dataset):
                 label.unsqueeze_(0)
                 class_vector = torch.zeros(1, self.c).scatter(1, label, 1)
 
-                test_class_sets.append(self.test_set[torch.eq(self.test_classes, class_vector).numpy()[:, i]])
+                test_class_sets.append(self.valid_set[torch.eq(self.valid_classes, class_vector).numpy()[:, i]])
                 test_labels.append(class_vector)
 
         # get max number of samples
@@ -590,8 +606,8 @@ class FuncDataset(data.Dataset):
                 label_list.append(np.repeat(label, n_test_samples, axis=0))
 
         # update training_data & training_classes with upsampled sets
-        self.test_set = np.concatenate(resampled_test_class_sets)
-        self.test_classes = torch.from_numpy(np.concatenate(label_list)).float()
+        self.valid_set = np.concatenate(resampled_test_class_sets)
+        self.valid_classes = torch.from_numpy(np.concatenate(label_list)).float()
 
     def delete_class(self, classname):
         self.rename_class(classname, "")
@@ -623,12 +639,12 @@ class FuncDataset(data.Dataset):
         if not self.convertToMultiLabels:
             # convert class names into numeric labels
             self.train_classes = torch.from_numpy(self.label_encoder.transform(self.train_classes)).float()
-            self.test_classes = torch.from_numpy(self.label_encoder.transform(self.test_classes)).float()
+            self.valid_classes = torch.from_numpy(self.label_encoder.transform(self.valid_classes)).float()
         # convertToMultiLabels not set:
         # create multi-hot encoded labels
         else:
             tensors = []
-            for class_set in [self.train_classes, self.test_classes]:
+            for class_set in [self.train_classes, self.valid_classes]:
                 tensor = torch.zeros(class_set.shape[0], self.c)
                 tensors.append(tensor)
                 for i in range(class_set.shape[0]):
@@ -644,7 +660,7 @@ class FuncDataset(data.Dataset):
                     tensor[i] = torch.zeros(class_label_tensor.size(0), self.c).scatter(1, class_label_tensor, 1)
 
             self.train_classes = tensors[0].float()
-            self.test_classes = tensors[1].float()
+            self.valid_classes = tensors[1].float()
 
 
     def __len__(self):
@@ -822,7 +838,7 @@ class EvaluationDataset:
 
     def __len__(self):
         'Denotes the total number of samples'
-        return len(self.dataset.test_set)
+        return len(self.dataset.valid_set)
 
     def __getitem__(self, index):
         'Generates one sample of data'
@@ -830,8 +846,8 @@ class EvaluationDataset:
         ID = str(index)
 
         # Load data and get label
-        X = torch.from_numpy(self.dataset.test_set[index, :]).float()
-        y = self.dataset.test_classes[index].float()
+        X = torch.from_numpy(self.dataset.valid_set[index, :]).float()
+        y = self.dataset.valid_classes[index].float()
 
         return X, y
 
