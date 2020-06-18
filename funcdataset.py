@@ -745,6 +745,22 @@ class FuncDataset(data.Dataset):
 
         plt.show()
 
+    def getPCA(self):
+        data_list = []
+        label_list = []
+        for directory_data in self.directory_data_dict.values():
+            data_list.append(directory_data.get_classified_data())
+            label_list.append(directory_data.get_classified_labels())
+        X = np.concatenate(data_list)
+        y = np.concatenate(label_list)
+
+        pca = PCA()
+        pca.fit(X, y)
+        pca.transform(X)
+
+        return pca
+
+
     def plot3DAnalysis(self):
         data_list = []
         label_list = []
