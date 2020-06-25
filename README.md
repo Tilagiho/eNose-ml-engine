@@ -30,7 +30,9 @@ The training scripts use fastai, which is only supported on linux. All other scr
     
 ## Analysing & Training datasets
 A dataset measured and annotated with the eNoseAnnotator can be analysed and used for training models in the eNose-ml-engine.
+
 The FuncDatasetClass loads and prepares the dataset. By default, it expects a filepath to a directory containing two directories: "train" containing the measurements of the train set and "valid" containing the measurements of the validation set.
+
 If you only want to analyse the dataset adjust the path to the dataset and configure the settings at the end of "funcdataset.py" and run the script in an interactive python console. 
 Afterwards you can call various visual analysation functions:
 ```
