@@ -28,4 +28,31 @@ The training scripts use fastai, which is only supported on linux. All other scr
     dataset = FuncDataset(<pathToDataset>)
     ```
     
-    
+## Analysing & Training datasets
+A dataset measured and annotated with the eNoseAnnotator can be analysed and used for training models in the eNose-ml-engine.
+The FuncDatasetClass loads and prepares the dataset. By default, it expects a filepath to a directory containing two directories: "train" containing the measurements of the train set and "valid" containing the measurements of the validation set.
+If you only want to analyse the dataset adjust the path to the dataset and configure the settings at the end of "funcdataset.py" and run the script in an interactive python console. 
+Afterwards you can call various visual analysation functions:
+```
+# plot 2-dimensional pca analysis & linear discrimant analysis of the dataset
+dataset.plot2DAnalysis()
+
+# plot the values of func 0 against all other functionalisations
+dataset.plot_func_relationships(0)
+
+# plot the values of func 0 against all other functionalisations,
+# but only use the classes in the list
+dataset.plot_func_relationships(0, ["Aceton", "Ethanol", "Isopropanol"])
+
+# plot the func correlation matrix
+dataset.plot_correlation_matrix()
+
+# the correlation matrix can be filtered for specific classes as well
+dataset.plot_correlation_matrix(["Ammoniak"])
+```
+
+If you want to train a feedforward model configure the settings at the beginning of "train.py" and run the script. The class TrainAnalyser can be used afterwards to plot the developements of the different metrics during training.
+
+For training support vector machines use the script "train_svm.py".
+
+You can use the class MultiLabelClassificationInterpretion after the training to analyse the results of feedforward models and svms. 
