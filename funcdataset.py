@@ -8,9 +8,11 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.utils import resample
 import os
 import time
+import math
 
 from typing import List
 
+import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
@@ -42,7 +44,127 @@ def medianFuncHeuristic(func_values: list, n_median_values: int=-1) :
 
     return median_average
 
-class DirectoryFuncData:
+def heatmap(data, row_labels, col_labels, ax=None,
+            cbar_kw={}, cbarlabel="", **kwargs):
+    """
+    Create a heatmap from a numpy array and two lists of labels.
+
+    Parameters
+    ----------
+    data
+        A 2D numpy array of shape (N, M).
+    row_labels
+        A list or array of length N with the labels for the rows.
+    col_labels
+        A list or array of length M with the labels for the columns.
+    ax
+        A `matplotlib.axes.Axes` instance to which the heatmap is plotted.  If
+        not provided, use current axes or create a new one.  Optional.
+    cbar_kw
+        A dictionary with arguments to `matplotlib.Figure.colorbar`.  Optional.
+    cbarlabel
+        The label for the colorbar.  Optional.
+    **kwargs
+        All other arguments are forwarded to `imshow`.
+    """
+
+    if not ax:
+        ax = plt.gca()
+
+    # Plot the heatmap
+    im = ax.imshow(data, **kwargs)
+
+    # Create colorbar
+    cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
+    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
+
+    # We want to show all ticks...
+    ax.set_xticks(np.arange(data.shape[1]))
+    ax.set_yticks(np.arange(data.shape[0]))
+    # ... and label them with the respective list entries.
+    ax.set_xticklabels(col_labels)
+    ax.set_yticklabels(row_labels)
+
+    # Let the horizontal axes labeling appear on top.
+    ax.tick_params(top=True, bottom=False,
+                   labeltop=True, labelbottom=False)
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=-30, ha="right",
+             rotation_mode="anchor")
+
+    # Turn spines off and create white grid.
+    for edge, spine in ax.spines.items():
+        spine.set_visible(False)
+
+    ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=True)
+    ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=True)
+    ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
+    return im, cbar
+
+
+def annotate_heatmap(im, data=None, valfmt="{x:.2f}",
+                     textcolors=["black", "white"],
+                     threshold=None, **textkw):
+    """
+    A function to annotate a heatmap.
+
+    Parameters
+    ----------
+    im
+        The AxesImage to be labeled.
+    data
+        Data used to annotate.  If None, the image's data is used.  Optional.
+    valfmt
+        The format of the annotations inside the heatmap.  This should either
+        use the string format method, e.g. "$ {x:.2f}", or be a
+        `matplotlib.ticker.Formatter`.  Optional.
+    textcolors
+        A list or array of two color specifications.  The first is used for
+        values below a threshold, the second for those above.  Optional.
+    threshold
+        Value in data units according to which the colors from textcolors are
+        applied.  If None (the default) uses the middle of the colormap as
+        separation.  Optional.
+    **kwargs
+        All other arguments are forwarded to each call to `text` used to create
+        the text labels.
+    """
+
+    if not isinstance(data, (list, np.ndarray)):
+        data = im.get_array()
+
+    # Normalize the threshold to the images color range.
+    if threshold is not None:
+        threshold = im.norm(threshold)
+    else:
+        threshold = im.norm(data.max())/2.
+
+    # Set default alignment to center, but allow it to be
+    # overwritten by textkw.
+    kw = dict(horizontalalignment="center",
+              verticalalignment="center")
+    kw.update(textkw)
+
+    # Get the formatter in case a string is supplied
+    if isinstance(valfmt, str):
+        valfmt = matplotlib.ticker.StrMethodFormatter(valfmt)
+
+    # Loop over the data and create a `Text` for each "pixel".
+    # Change the text's color depending on the data.
+    texts = []
+    for i in range(data.shape[0]):
+        for j in range(data.shape[1]):
+            kw.update(color=textcolors[int(im.norm(data[i, j]) > threshold)])
+            text = im.axes.text(j, i, valfmt(data[i, j], None), **kw)
+            texts.append(text)
+
+    return texts
+
+
+class DirectoryFuncData(data.Dataset):
     """"
     Stores data of all files in one directory.
     Stores the original data of each file as a pandas DataFrame and the converted data as a numpy array.
@@ -631,6 +753,8 @@ class FuncDataset(data.Dataset):
         self.label_encoder = preprocessing.LabelEncoder()
         self.label_encoder.fit(self.classes)
 
+        print("Renamed class \"" + old_name + "\" to \"" + new_name + "\"")
+
     def convert_class_labels(self):
         '''convert self.train_classes & self.test_classes into tensors usable for training'''
         # convertToMultiLabels not set:
@@ -702,19 +826,27 @@ class FuncDataset(data.Dataset):
 
         return pca, scaler, max, min
 
-    def plot2DAnalysis(self):
+    def plot2DAnalysis(self, svm=None):
         data_list = []
         label_list = []
         for directory_data in self.directory_data_dict.values():
             data_list.append(directory_data.get_classified_data())
             label_list.append(directory_data.get_classified_labels())
+
         X = np.concatenate(data_list)
+        try:
+            X = self.scaler.transform(X)
+        except: # ignore if scaler was not fitted
+            pass
         y = np.concatenate(label_list)
+
         lda = LinearDiscriminantAnalysis()
         pca = PCA()
 
+        color_list = plt.get_cmap('tab10').colors
+
         # methods used
-        dim_reduction_methods = [('Linear Discriminant Analysis', lda), ('Pricipal Component Analysis', pca)]
+        dim_reduction_methods = [('Linear Discriminant Analysis', lda), ('Principal Component Analysis', pca)]
 
         # plt.figure()
         for i, (name, model) in enumerate(dim_reduction_methods):
@@ -726,15 +858,30 @@ class FuncDataset(data.Dataset):
             # Fit the method's model
             model.fit(X, y)
             print(name)
-            print(model.explained_variance_ratio_)
+            print("Explained variance: " + str(model.explained_variance_ratio_))
+            if name == 'Linear Discriminant Analysis':
+                components = model.coef_
+            else:
+                print("___Principal Component Analysis___")
+                print("Explained Variance\tEigenvector")
+                for explained_variance, eigenvector in zip(pca.explained_variance_ratio_, pca.components_):
+                    print("{:18.4f}".format(explained_variance) + "\t" + str(eigenvector) +"\n")
 
             # Embed the data set in 2 dimensions using the fitted model
             X_embedded = model.transform(X)
 
+            if svm is not None:
+                X_support = model.transform(self.train_set)[svm.support_]
+                y_support = self.label_encoder.inverse_transform(self.train_classes[svm.support_])
+
             # Plot the projected points and show the evaluation score
-            for c in self.label_encoder.classes_:
+            for i, c in enumerate(self.label_encoder.classes_):
                 scatterAx.scatter(X_embedded[y == c, 0], X_embedded[y == c, 1],
-                                  label=c, s=2)
+                                  label=c, color=color_list[i], s=6)
+
+                if svm is not None:
+                    scatterAx.scatter(X_support[y_support == c, 0], X_support[y_support == c, 1],
+                                      s=6, color=color_list[i], edgecolors='black', zorder=20)
 
             scatterAx.legend(loc='best', shadow=False, scatterpoints=1)
             scatterAx.set_title("{}".format(name))
@@ -756,7 +903,6 @@ class FuncDataset(data.Dataset):
 
         pca = PCA()
         pca.fit(X, y)
-        pca.transform(X)
 
         return pca
 
@@ -842,6 +988,152 @@ class FuncDataset(data.Dataset):
     def detect_probs(self, model):
         for func_data_dir in self.directory_data_dict.values():
             func_data_dir.detect_probs(model, self.label_encoder.classes_)
+
+    def get_correlation_matrix(self, classlist: list = None):
+        # no classlist specified:
+        # use all classes
+        if classlist is None:
+            classlist = self.classes
+
+        datalist = []
+        for classindex in self.label_encoder.transform(classlist):
+            if self.convertToMultiLabels:
+                datalist.append(self.train_set[self.train_classes[:, classindex].bool()])
+                datalist.append(self.valid_set[self.valid_classes[:, classindex].bool()])
+            else:
+                datalist.append(self.train_set[self.train_classes == classindex])
+                datalist.append(self.valid_set[self.valid_classes == classindex])
+        dataset = np.concatenate(datalist)
+
+        df = pd.DataFrame(data=dataset)
+        return df.corr()
+
+    def get_r2_matrix(self, classlist: list = []):
+        corr = self.get_correlation_matrix(classlist)
+        return corr**2
+
+    def plot_correlation_matrix(self, classlist: list = None):
+        # get correlation matrix
+        corr = self.get_correlation_matrix(classlist)
+
+        if classlist is None:
+            classlist = self.classes
+
+        # plot correlation matrix as a heatmap
+        fig, ax = plt.subplots()
+
+        cmap_name = "YlGn"
+
+        im, cbar = heatmap(corr.to_numpy(), [str(i) for i in range(corr.shape[0])], [str(i) for i in range(corr.shape[0])], ax=ax,
+                           cmap=cmap_name, cbarlabel="Correlation coefficient")
+        if corr.shape[0] < 16:
+            texts = annotate_heatmap(im, valfmt="{x:.3f}")
+
+        fig.suptitle("Correlation Matrix of " + ", ".join(classlist))
+        # fig.tight_layout()
+        plt.show()
+
+    def plot_r2_matrix(self, classlist: list = []):
+        # get correlation matrix
+        r2 = self.get_r2_matrix(classlist)
+
+        if classlist == []:
+            classlist = self.classes
+
+        # plot correlation matrix as a heatmap
+        fig, ax = plt.subplots()
+
+        cmap_name = "YlGn"
+
+        im, cbar = heatmap(r2.to_numpy(), [str(i) for i in range(r2.shape[0])],
+                           [str(i) for i in range(r2.shape[0])], ax=ax,
+                           cmap=cmap_name, cbarlabel="R2 value")
+        if r2.shape[0] < 16:
+            texts = annotate_heatmap(im, valfmt="{x:.3f}")
+
+        fig.suptitle("R2 Matrix of " + ", ".join(classlist))
+        # fig.tight_layout()
+        plt.show()
+
+    def plot_func_relationships(self, fixed_func: int, classlist: list = None):
+        if classlist is None:
+            classlist = self.classes
+
+        # prepare data
+        X = np.concatenate([self.train_set, self.valid_set])
+        y = np.concatenate([self.train_classes, self.valid_classes])
+
+        # start plotting
+        # determine number of subplots
+        n_subplots = self.train_set.shape[1]
+
+        plots_per_row = math.ceil(n_subplots/2)
+
+        fig, axes = plt.subplots(nrows=2, ncols=plots_per_row)
+        fig.suptitle("Crossplots for func " + str(fixed_func))
+
+        for func in range(self.train_set.shape[1]):
+            ax = axes[math.floor(func / plots_per_row), func % plots_per_row]
+            ax.set_title(str(fixed_func) + " vs " + str(func))
+            for classname in classlist:
+                classlabel = self.label_encoder.transform([classname])[0]
+
+                if self.convertToMultiLabels:
+                    indexes = np.array(y[:, classlabel], dtype=bool)
+                else:
+                    indexes = y == classname
+
+                ax.scatter(X[indexes, fixed_func], X[indexes, func], label=classname)
+
+        # add legend for the whole plot
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='right', shadow=False, scatterpoints=1)
+        plt.show()
+
+    def plot_func_relationship(self, xfunc: int, yfunc: int,classlist: list = None):
+        if classlist is None:
+            classlist = self.classes
+
+        # prepare data
+        X = np.concatenate([self.train_set, self.valid_set])
+        y = np.concatenate([self.train_classes, self.valid_classes])
+
+        # start plotting
+        fig, ax = plt.subplots()
+        fig.suptitle("Crossplot for func " + str(xfunc) + " vs " + str(yfunc))
+
+        for classname in classlist:
+            classlabel = self.label_encoder.transform([classname])[0]
+
+            if self.convertToMultiLabels:
+                indexes = np.array(y[:, classlabel], dtype=bool)
+            else:
+                indexes = y == classname
+
+            ax.scatter(X[indexes, xfunc], X[indexes, yfunc], label=classname)
+
+        # add legend for the whole plot
+        handles, labels = ax.get_legend_handles_labels()
+        fig.legend(handles, labels, loc='right', shadow=False, scatterpoints=1)
+        plt.show()
+
+    def get_linear_fit(self, xfunc: int, yfunc: int, classlist: list = None):
+        if classlist is None:
+            classlist = self.classes
+
+        datalist = []
+        for classindex in self.label_encoder.transform(classlist):
+            if self.convertToMultiLabels:
+                datalist.append(self.train_set[self.train_classes[:, classindex].bool()])
+                datalist.append(self.valid_set[self.valid_classes[:, classindex].bool()])
+            else:
+                datalist.append(self.train_set[self.train_classes == classindex])
+                datalist.append(self.valid_set[self.valid_classes == classindex])
+        dataset = np.concatenate(datalist)
+
+        coefficients, residuals, _, _, _ = np.polyfit(range(dataset.shape[0]),dataset[[xfunc, yfunc]],1,full=True)
+
+        return coefficients
 
 
 class EvaluationDataset:
@@ -946,7 +1238,14 @@ class MeasIterator:
 
 
 if __name__ == "__main__":
+    merge_eth_ipa_ac = False
+    balance = False
+    normalise = False
     dataset = FuncDataset(data_dir='data/eNose-base-dataset',
                           convertToRelativeVectors=True, calculateFuncVectors=True,
                           convertToMultiLabels=True)
-    dataset.setDirSplit(["train"], ["validate"])
+    if merge_eth_ipa_ac:
+        dataset.rename_class("Aceton", "Eth IPA Ac")
+        dataset.rename_class("Ethanol", "Eth IPA Ac")
+        dataset.rename_class("Isopropanol", "Eth IPA Ac")
+    dataset.setDirSplit(["train"], ["validate"], normaliseData=normalise, balanceDatasets=balance)
