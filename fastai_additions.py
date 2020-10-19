@@ -6,7 +6,8 @@ from itertools import cycle
 from sklearn.svm import SVC
 from sklearn.metrics import roc_curve, auc
 from numpy import interp
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, fbeta_score
+import sklearn
 
 from funcdataset import *
 
@@ -19,8 +20,63 @@ import numpy as np
 # path to eNoseAnnotator executable
 eNoseAnnotatorPath = ""
 
+
+def multi_label_roc_curve(target:tensor, preds:tensor, step=0.05):
+    """
+    implements roc calculation with the adjustment of the "No Smell" channel based on the threshold.
+    This has to be done, because the presence "No Smell" is not an direct output of the fastai Learner, but instead
+    deducted when no other class is detected.
+    """
+    n_classes = target.shape[1]
+
+    tpr = {i: np.array([]) for i in range(n_classes)}
+    fpr = {i: np.array([]) for i in range(n_classes)}
+    thresholds = np.array([])
+
+    for thresh in np.arange(0., 1.+step, step):
+
+        # apply threshold to predictions
+        pred_classes = preds > thresh
+
+        # adjust 'No Smell' channel to the current threshold
+        pred_classes[:, -1] = ~(pred_classes[:, :-1].any(dim=1))
+
+        # Calculate tpr, fpr for each class
+        for i in range(n_classes):
+            # preparation for calculation of fpr & tpr
+            # get true-positives(tp), positives(p), false-positives(fp) and negatives(n)
+            tp = (target[:, i] & pred_classes[:, i]).sum().item()
+            p = target[:, i].sum().item()
+            fp = (~target[:, i] & pred_classes[:, i]).sum().item()
+            n = target.shape[0] - p
+
+            # add tpr
+            if p == 0:
+                # avoid zero division:
+                tpr[i] = np.append(tpr[i], tpr[i][-1])
+            else:
+                tpr[i] = np.append(tpr[i], tp / p)
+
+            # add fpr
+            if n == 0:
+                # avoid zero division:
+                fpr[i] = np.append(fpr[i], fpr[i][-1])
+            else:
+                fpr[i] = np.append(fpr[i], fp / n)
+
+        thresholds = np.append(thresholds, thresh)
+
+    # reverse arrays
+    for i in range(n_classes):
+        tpr[i] = tpr[i][::-1]
+        fpr[i] = fpr[i][::-1]
+    thresholds = thresholds[::-1]
+
+    return tpr, fpr, thresholds
+
+
 class MultiLabelClassificationInterpretation:
-    "Interpretation methods fpr multi-label classification models."
+    "Interpretation methods for multi-label classification models."
     def __init__(self, dataset:FuncDataset, learn:Learner=None, svm:SVC=None, thresh:float=0.3):
         # if interpretation of fastai Learner
         if learn is not None:
@@ -28,17 +84,17 @@ class MultiLabelClassificationInterpretation:
             n_classes = dataset.c + 1
             classes = dataset.y.classes + ['No Smell']
 
-            # get predictions for the calidation set
+            # get predictions for the validation set
             preds, y, losses = learn.get_preds(with_loss=True)
 
+            # # prepare predicted labels
             # add column for no class being predicted
+            # preds
             no_class_preds = torch.ones([preds.shape[0], 1]) - preds.max(dim=1).values.unsqueeze(dim=1)
             preds = torch.cat([preds, no_class_preds], dim=1)
 
-            # # prepare predicted labels
-            # apply threshold to predictions
-            pred_classes = torch.zeros_like(preds, dtype=torch.bool)
-            pred_classes[preds>thresh] = True
+            # pred_classes
+            pred_classes = self.get_threshed_preds(thresh, preds)
 
             # # prepare true classes
             y_true = y.bool()
@@ -49,21 +105,46 @@ class MultiLabelClassificationInterpretation:
         # if interpretation of support vector machine
         elif svm is not None:
             # meta infos
-            n_classes = dataset.c
-            classes = dataset.y.classes
+            n_classes = dataset.c + 1
+            classes = dataset.y.classes + ['No Smell']
 
             # prepare true classes
-            y_true = torch.zeros([dataset.valid_classes.shape[0], dataset.c]).long()
-            y_true.scatter_(1, dataset.valid_classes.long().unsqueeze(dim=1), 1.)
+            # y_true = torch.zeros([dataset.valid_classes.shape[0], dataset.c]).long()
+            # y_true.scatter_(1, dataset.valid_classes.long().unsqueeze(dim=1), 1.)
+            # preds = torch.from_numpy(svm.predict_proba(dataset.valid_set))
+            # pred_classes = self.get_threshed_preds(thresh, preds)
+            # losses = None   # TODO
+
+            y_true = dataset.valid_classes.bool()
+            no_class_true = ~y_true.any(dim=1)
+            no_class_true.unsqueeze_(1)
+            y_true = torch.cat([y_true, no_class_true], dim=1)
+
             preds = torch.from_numpy(svm.predict_proba(dataset.valid_set))
-            pred_classes = torch.zeros_like(preds, dtype=torch.bool)
-            pred_classes[preds>thresh] = True
-            losses = None   # TODO
+            no_class_preds = torch.ones([preds.shape[0], 1]) - preds.max(dim=1).values.unsqueeze(dim=1)
+            preds = torch.cat([preds, no_class_preds], dim=1)
+
+            pred_classes = torch.from_numpy(np.array(svm.predict(dataset.valid_set), dtype=np.bool))
+            pred_classes = torch.cat([pred_classes, ~(pred_classes.any(dim=1)).reshape((-1,1))], dim=1)
+
+            losses = None
         else:
             raise ValueError("Either learn or svm has to be specified!")
 
         self.n_classes, self.classes = n_classes, classes
-        self.learn, self.y_true, self.losses, self.preds, self.pred_classses, self.dataset = learn, y_true, losses, preds, pred_classes, dataset
+        self.learn, self.y_true, self.losses, self.preds, self.pred_classes, self.dataset = learn, y_true, losses, preds, pred_classes, dataset
+
+    def get_threshed_preds(self, thresh,preds=None):
+        if preds is None:
+            preds = self.preds
+
+        # apply threshold to predictions
+        pred_classes = preds > thresh
+
+        # adjust 'No Smell' channel to the current threshold
+        pred_classes[:, -1] = ~(pred_classes[:, :-1].any(dim=1))
+
+        return pred_classes
 
     def confusion_matrix(self, thresh:float=None,target_type='single_class_labels'):
         "Confusion matrix as an `np.ndarray`. Only implemented for targets with exactly one label."
@@ -74,9 +155,9 @@ class MultiLabelClassificationInterpretation:
         cm = torch.zeros([self.y_true.shape[1], self.y_true.shape[1]])
 
         if thresh is None:
-            pred_classes = self.pred_classses
+            pred_classes = self.pred_classes
         else:
-            pred_classes = self.preds>thresh
+            pred_classes = self.get_threshed_preds(thresh)
 
         for i in range(self.y_true.shape[0]):
             c = self.y_true[i].long().argmax(dim=0)
@@ -89,36 +170,49 @@ class MultiLabelClassificationInterpretation:
 
         return to_np(cm)
 
+    def fbeta_vs_thresh(self, beta=1., step=0.01):
+        fbeta_scores = dict()
+
+        for thresh in np.arange(0.+step, 1., step):
+            fbeta_scores[thresh] = self.fbeta_score(beta, thresh)
+
+        return fbeta_scores
+
+    def plot_fbeta_vs_thresh(self, beta=1., step=0.01):
+        fbeta_scores = self.fbeta_vs_thresh(beta, step)
+
+        fig = plt.figure()
+
+        plt.plot(list(fbeta_scores.keys()), list(fbeta_scores.values()))
+        fig.show()
+
     def roc_auc_score(self):
         return roc_auc_score(self.y_true, self.preds)
 
-    # def top_loss_measurements(self, dataset: FuncDataset, k: int = None, largest=True):
-    #     "`k` filepaths???? to measurements with the largest(/smallest) average loss, defaulting to all measurements (sorted by `largest`)."
-    #     for filename in dataset.directory_data_dict:
-    #         dir_data = dataset.directory_data_dict[filename]
-    #         X = dir_data.get_classified_data()
-    #         target = dir_data.get_classified_labels()
-    #         preds =
-
-    def exact_match_score(self):
+    def exact_match_score(self, thresh=None):
         count = 0
         total = self.y_true.shape[0]
 
         for i in range(total):
-            if (self.y_true[i] == self.pred_classses[i]).all():
+            if (self.y_true[i] == self.pred_classes[i]).all():
                 count += 1
 
         return count / total
 
-    def accuracy_score(self):
-        cm = self.confusion_matrix()
+    def accuracy_score(self, thresh=None):
+        cm = self.confusion_matrix(thresh)
         return cm.trace()/cm.sum()
 
-    def recall_score(self):
-        return (self.y_true & self.pred_classses).sum().item() / self.y_true.shape[0]
+    def recall_score(self, thresh=None):
+        if thresh is None:
+            pred_classes = self.pred_classes
+        else:
+            pred_classes = self.get_threshed_preds(thresh)
 
-    def precision_score(self):
-        cm = self.confusion_matrix()
+        return (self.y_true & pred_classes).sum().item() / self.y_true.shape[0]
+
+    def precision_score(self, thresh=None):
+        cm = self.confusion_matrix(thresh)
 
         precision = 0.
         for i in range(cm.shape[0]):
@@ -126,22 +220,31 @@ class MultiLabelClassificationInterpretation:
 
         return precision
 
-    def fbeta_score(self, beta=1.):
-        recall = self.recall_score()
-        precision = self.precision_score()
+    def fbeta_score(self, beta, thresh=None, average='macro'):
+        if thresh is None:
+            pred_classes = self.pred_classes
+        else:
+            pred_classes = self.preds>thresh
 
-        return (1+beta*beta) * precision * recall / (beta * beta * precision + recall)
+        return fbeta_score(self.y_true, pred_classes, beta=beta, average=average, zero_division=1)
 
     def roc(self, step=0.05):
-        n_classes = self.y_true.shape[1]
-
         # Compute ROC curve and ROC area for each class
         fpr = dict()
         tpr = dict()
         roc_auc = dict()
 
-        for i in range(n_classes):
-            fpr[i], tpr[i], _ = roc_curve(self.y_true[:, i], self.preds[:, i])
+        # multilabel prediction with fastai Learner:
+        # implicit class 'No Smell has to be accounted for'
+        if self.learn is not None:
+            fpr, tpr, _ = multi_label_roc_curve(self.y_true, self.preds)
+        # otherwise:
+        # use binary sklearn roc_curve
+        else:
+            for i in range(self.n_classes):
+                fpr[i], tpr[i], _ = roc_curve(self.y_true[:, i], self.preds[:, i])
+
+        for i in range(self.n_classes):
             roc_auc[i] = auc(fpr[i], tpr[i])
 
         # Compute micro-average ROC curve and ROC area
@@ -149,15 +252,15 @@ class MultiLabelClassificationInterpretation:
         roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
 
         # First aggregate all false positive rates
-        all_fpr = np.unique(np.concatenate([fpr[i] for i in range(n_classes)]))
+        all_fpr = np.unique(np.concatenate([fpr[i] for i in range(self.n_classes)]))
 
         # Then interpolate all ROC curves at this points
         mean_tpr = np.zeros_like(all_fpr)
-        for i in range(n_classes):
+        for i in range(self.n_classes):
             mean_tpr += interp(all_fpr, fpr[i], tpr[i])
 
         # Finally average it and compute AUC
-        mean_tpr /= n_classes
+        mean_tpr /= self.n_classes
 
         fpr["macro"] = all_fpr
         tpr["macro"] = mean_tpr
@@ -166,12 +269,11 @@ class MultiLabelClassificationInterpretation:
         return tpr, fpr, roc_auc
 
     def plot_confusion_matrix(self, normalize: bool = False, title: str = 'Confusion matrix', cmap: Any = "Blues",
-                              slice_size: int = None,
-                              norm_dec: int = 2, plot_txt: bool = True, return_fig: bool = None, **kwargs) -> Optional[
+                              norm_dec: int = 2, plot_txt: bool = True, return_fig: bool = None, thresh=None, **kwargs) -> Optional[
         plt.Figure]:
         "Plot the confusion matrix, with `title` and using `cmap`."
         # This function is mainly copied from the sklearn docs
-        cm = self.confusion_matrix()
+        cm = self.confusion_matrix(thresh)
         if normalize: cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
         fig = plt.figure(**kwargs)
         plt.imshow(cm, interpolation='nearest', cmap=cmap)
@@ -230,6 +332,17 @@ class MultiLabelClassificationInterpretation:
         plt.title('Multi-label Receiver Operating Characteristic')
         plt.legend(loc="lower right")
         plt.show()
+
+    def plot_metrics(self, step:float=0.05, beta=4):
+        recall = []
+        precision = []
+        exact_match = []
+        fbeta = []
+
+        thresholds = []
+
+        for thresh in np.arange(0., 1.+step, step):
+            recall.append()
 
 
 class MultiLabelExactMatch(Callback):

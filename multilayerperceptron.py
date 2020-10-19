@@ -4,26 +4,32 @@ import torch.nn as nn
 import math
 
 class MultiLayerPerceptron(nn.Module):
-    def __init__(self, nFuncs, classList, isInputAbsolute = False , name ="MultiLayerPerceptron", mean=[], variance=[], nHiddenLayers=0, nHiddenNeuronPerLayer=0, loss_func=None):
+    def __init__(self, nFuncs, classList, isInputAbsolute = False , name ="MultiLayerPerceptron", mean=[], variance=[], nHiddenLayers=0, nHiddenNeuronPerLayer=0, loss_func=None, input_function="average", output_function="logsoftmax", is_multi_label=False, threshold=0.3):
         super (MultiLayerPerceptron, self).__init__()
 
         # list of class names
-        self.classList = ','.join(list(classList))
+        self.classList: str = ','.join(list(classList))
 
         # N inputs, M outputs
-        self.N = nFuncs
-        self.M = len(classList)
+        self.N: int = nFuncs
+        self.M: int = len(classList)
 
-        # meta information:
+        # meta information for usage in c++ bindings:
         # name
-        self.name = name
+        self.name: str = name
+
+        self.input_function: str = input_function
+        self.output_function: str = output_function
+        self.is_multi_label: bool = is_multi_label
+        self.threshold: float = threshold
+
 
         # should input be absolute? (or relative to base vector)
         self.isInputAbsolute = isInputAbsolute
 
         # info about normalisation
-        self.mean = list(mean)
-        self.variance = list(variance)
+        self.mean: list[float] = list(mean)
+        self.variance: list[float] = list(variance)
 
         # get variables for hidden layers
         if nHiddenNeuronPerLayer == 0:
@@ -31,7 +37,7 @@ class MultiLayerPerceptron(nn.Module):
         else:
             self.nHiddenNeuronPerLayer = nHiddenNeuronPerLayer
 
-        self.nHiddenLayers = nHiddenLayers
+        self.nHiddenLayers: int = nHiddenLayers
 
         # define network
         self.networkFunctions = nn.ModuleList()

@@ -4,7 +4,7 @@ import multilayerperceptron
 #                   #
 #       models      #
 #                   #
-def create_model(model_name, dataset, nHiddenLayers=0, loss_func=None):
+def create_model(model_name, dataset, nHiddenLayers=0, loss_func=None, input_function="average", output_function="logsoftmax", is_multi_label=False, threshold=0.3):
     switcher={
         'multi_layer_perceptron':multilayerperceptron.MultiLayerPerceptron(dataset.full_data.shape[1], dataset.label_encoder.classes_,
                                 name= model_name,

@@ -109,13 +109,13 @@ def read_csv(filename):
     measurement = pd.read_csv(filename, delimiter=';', comment='#', names=header)
 
     # get base vectors, functionalisation
-    with open(filename, 'r') as f:
+    with open(filename, 'r', encoding='latin1') as f:
         line = f.readline()
 
         functionalisation = [0 for i in range(64)]
         base_vectors = []
         sensor_failures = [False for i in range(64)]
-        while line:
+        while line.startswith('#'):
             if line.startswith("#baseLevel:"):
                 data = (line.split("baseLevel:")[1]).split(";")
                 base_vector = [data[0]]

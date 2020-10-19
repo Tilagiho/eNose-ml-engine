@@ -135,3 +135,7 @@ dmypy.json
 # local data
 data/*
 models/
+
+traced_models/
+
+results/

@@ -1,4 +1,5 @@
 import csv_loader
+
 import pandas as pd
 import numpy as np
 import torch
@@ -12,18 +13,23 @@ import math
 
 from typing import List
 
-import matplotlib
+import plot_helpers
+
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import torch.nn as nn
 from dataclasses import dataclass
 
-import statistics
+from itertools import chain, combinations
 
 # constants
 ts = 0.33   # size of test set for train/ test split
+
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
 """
 Heuristic for calculating more stable functionalisation vectors:
@@ -36,133 +42,22 @@ def medianFuncHeuristic(func_values: list, n_median_values: int=-1) :
         n_median_values = int(np.ceil(len(func_values) / 2.))
 
     # find n_median_values medians and average
-    median_average = 0.
-    for i in range(n_median_values):
-        median_value = statistics.median_high(func_values)
-        median_average += median_value / n_median_values
-        func_values.remove(median_value)
+    # sort func_values
+    sorted_func_values = sorted(func_values)
+
+    remove_last = False
+
+    while len(sorted_func_values) > n_median_values:
+        if remove_last:
+            sorted_func_values.pop(-1)
+        else:
+            sorted_func_values.pop(0)
+
+        remove_last = not remove_last
+
+    median_average = np.average(sorted_func_values)
 
     return median_average
-
-def heatmap(data, row_labels, col_labels, ax=None,
-            cbar_kw={}, cbarlabel="", **kwargs):
-    """
-    Create a heatmap from a numpy array and two lists of labels.
-
-    Parameters
-    ----------
-    data
-        A 2D numpy array of shape (N, M).
-    row_labels
-        A list or array of length N with the labels for the rows.
-    col_labels
-        A list or array of length M with the labels for the columns.
-    ax
-        A `matplotlib.axes.Axes` instance to which the heatmap is plotted.  If
-        not provided, use current axes or create a new one.  Optional.
-    cbar_kw
-        A dictionary with arguments to `matplotlib.Figure.colorbar`.  Optional.
-    cbarlabel
-        The label for the colorbar.  Optional.
-    **kwargs
-        All other arguments are forwarded to `imshow`.
-    """
-
-    if not ax:
-        ax = plt.gca()
-
-    # Plot the heatmap
-    im = ax.imshow(data, **kwargs)
-
-    # Create colorbar
-    cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
-    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
-
-    # We want to show all ticks...
-    ax.set_xticks(np.arange(data.shape[1]))
-    ax.set_yticks(np.arange(data.shape[0]))
-    # ... and label them with the respective list entries.
-    ax.set_xticklabels(col_labels)
-    ax.set_yticklabels(row_labels)
-
-    # Let the horizontal axes labeling appear on top.
-    ax.tick_params(top=True, bottom=False,
-                   labeltop=True, labelbottom=False)
-
-    # Rotate the tick labels and set their alignment.
-    plt.setp(ax.get_xticklabels(), rotation=-30, ha="right",
-             rotation_mode="anchor")
-
-    # Turn spines off and create white grid.
-    for edge, spine in ax.spines.items():
-        spine.set_visible(False)
-
-    ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=True)
-    ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=True)
-    ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
-    ax.tick_params(which="minor", bottom=False, left=False)
-
-    return im, cbar
-
-
-def annotate_heatmap(im, data=None, valfmt="{x:.2f}",
-                     textcolors=["black", "white"],
-                     threshold=None, **textkw):
-    """
-    A function to annotate a heatmap.
-
-    Parameters
-    ----------
-    im
-        The AxesImage to be labeled.
-    data
-        Data used to annotate.  If None, the image's data is used.  Optional.
-    valfmt
-        The format of the annotations inside the heatmap.  This should either
-        use the string format method, e.g. "$ {x:.2f}", or be a
-        `matplotlib.ticker.Formatter`.  Optional.
-    textcolors
-        A list or array of two color specifications.  The first is used for
-        values below a threshold, the second for those above.  Optional.
-    threshold
-        Value in data units according to which the colors from textcolors are
-        applied.  If None (the default) uses the middle of the colormap as
-        separation.  Optional.
-    **kwargs
-        All other arguments are forwarded to each call to `text` used to create
-        the text labels.
-    """
-
-    if not isinstance(data, (list, np.ndarray)):
-        data = im.get_array()
-
-    # Normalize the threshold to the images color range.
-    if threshold is not None:
-        threshold = im.norm(threshold)
-    else:
-        threshold = im.norm(data.max())/2.
-
-    # Set default alignment to center, but allow it to be
-    # overwritten by textkw.
-    kw = dict(horizontalalignment="center",
-              verticalalignment="center")
-    kw.update(textkw)
-
-    # Get the formatter in case a string is supplied
-    if isinstance(valfmt, str):
-        valfmt = matplotlib.ticker.StrMethodFormatter(valfmt)
-
-    # Loop over the data and create a `Text` for each "pixel".
-    # Change the text's color depending on the data.
-    texts = []
-    for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
-            kw.update(color=textcolors[int(im.norm(data[i, j]) > threshold)])
-            text = im.axes.text(j, i, valfmt(data[i, j], None), **kw)
-            texts.append(text)
-
-    return texts
-
 
 class DirectoryFuncData(data.Dataset):
     """"
@@ -217,25 +112,58 @@ class DirectoryFuncData(data.Dataset):
             dataframes.append(file_data.dataframe)
         return dataframes
 
-
     """ Returns concatenated np.array of the data of all files """
-    def get_data(self):
-        return np.concatenate(self.func_data)
+    def get_data(self, exclude:list):
+        n_funcs = self.func_data[0].shape[1]
+
+        # prepare empty array
+        data = np.zeros((0, n_funcs))
+
+        for filename, func_data in zip(self.get_filenames(), self.func_data):
+            # check exclude list
+            file_excluded = False
+            for sequence in exclude:
+                if sequence in filename:
+                    file_excluded = True
+
+            # append func_data to data if file is not excluded
+            if not file_excluded:
+                data = np.append(data, func_data).reshape((-1, n_funcs))
+        return data
 
     """ Returns concatenated np.array of the labels of all files """
-    def get_labels(self):
-        return np.concatenate(self.label_list)
+    def get_labels(self, exclude):
+        # prepare empty array
+        full_labels = np.zeros((0))
+
+        for filename, labels in zip(self.get_filenames(), self.label_list):
+            # check exclude list
+            file_excluded = False
+            for sequence in exclude:
+                if sequence in filename:
+                    file_excluded = True
+
+            # append func_data to data if file is not excluded
+            if not file_excluded:
+                full_labels = np.append(full_labels, labels)
+        return full_labels
 
     """ Returns concatenated np.array of the data of all files """
-    def get_classified_data(self):
-        full_data = self.get_data()
-        full_labels = self.get_labels()
+    def get_classified_data(self, exclude:list):
+        full_data = self.get_data(exclude)
+        full_labels = self.get_labels(exclude)
+
+        if full_data.size == 0:
+            return full_data
 
         return full_data[full_labels != ""]
 
     """ Returns concatenated np.array of the labels of all files """
-    def get_classified_labels(self):
-        full_labels = self.get_labels()
+    def get_classified_labels(self, exclude):
+        full_labels = self.get_labels(exclude)
+
+        if full_labels.size == 0:
+            return full_labels
 
         return full_labels[full_labels != ""]
 
@@ -258,6 +186,10 @@ class DirectoryFuncData(data.Dataset):
     def rename_class(self, old_name: str, new_name: str):
         for labels in self.label_list:
             labels[labels == old_name] = new_name
+
+    def drop_func(self, func: int):
+        for i in range(len(self.func_data)):
+            self.func_data[i] = np.delete(self.func_data[i], func, axis=1)
 
     @staticmethod
     def get_relative_vector(vector, base_vector_list, timestamp):
@@ -354,28 +286,59 @@ class DirectoryFuncData(data.Dataset):
         #                                     #
         #   convert meas_data to func_data    #
         #                                     #
-        func_data = np.zeros([meas_data.shape[0], max(self.funcMap)+1])
+        func_data = np.zeros([meas_data.shape[0], len(self.funcMap)])
+        func_keys = sorted(list(self.funcMap.keys()))
 
         for row in range (0, func_data.shape[0]):
             # create value list fo each functionalisation
             # valueMap: dict {func id: list of values}
             valueMap = {}
             for channel in range(0, meas_data.shape[1]):
+                # ignore channels with sensor failures
+                if failures[channel]:
+                    continue
 
                 # column: index of channels func in funcMap.keys()
-                func = self.functionalisation[channel]
+                funcIndex = func_keys.index(self.functionalisation[channel])
 
                 # add channel value
-                if not func in valueMap:
-                    valueMap[func] = [meas_data[row, channel]]
+                if not funcIndex in valueMap:
+                    valueMap[funcIndex] = [meas_data[row, channel]]
                 else:
-                    valueMap[func].append(meas_data[row, channel])
+                    valueMap[funcIndex].append(meas_data[row, channel])
 
             # use heuristic to determine functionalisation values
-            for func in valueMap:
-                func_data[row, func] = medianFuncHeuristic(valueMap[func])
+            for funcIndex in valueMap:
+                func_data[row, funcIndex] = medianFuncHeuristic(valueMap[funcIndex])
 
         return func_data
+
+    def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.get_classified_labels())
+
+    def __getitem__(self, index):
+        'Generates one sample of data'
+        # Select sample
+        ID = str(index)
+
+        # Load data and get label
+        if self.item is None:
+            # Load data and get label
+            X = torch.from_numpy(self.dataset.valid_set[index, :]).float()
+            y = self.dataset.valid_classes[index].float()
+
+            return X, y
+        else:
+            item = self.item
+            self.item = None
+
+            return item, None
+
+        return X, y
+
+    def __enter__(self):
+        return self
 
 @dataclass
 class MetaContainer:
@@ -401,6 +364,8 @@ class FuncDataset(data.Dataset):
         self.is_relative = convertToRelativeVectors
         self.convertToMultiLabels = convertToMultiLabels
 
+        self.item = None
+
         # configurations for time series models:
         self.n_output_vectors = n_out_vecs  # number of vectors in output for each index i
         if not out_vec_steps or len(out_vec_steps) != len( self.n_output_vectors):   # if default out_vec_steps or invalid steps
@@ -409,6 +374,9 @@ class FuncDataset(data.Dataset):
             self.output_vectors_steps = out_vec_steps
 
         self.n_averaged_vecs = n_averaged_vecs  # number of vectors averaged for each vector in output
+
+        # init functionalisation
+        self.func_vector_header = []
 
         # load data from all subdirs in dir and store in directory_data_dict
         self.directory_data_dict = {}
@@ -424,6 +392,21 @@ class FuncDataset(data.Dataset):
             if os.path.isdir(path):
                 self.directory_data_dict[path] = DirectoryFuncData(path, convertToRelativeVectors, calculateFuncVectors)
 
+                # ignore empty directories
+                if not self.directory_data_dict[path].func_data:
+                    continue
+
+                # check functionalisation
+                if calculateFuncVectors:
+                    dir_func_vector_header = sorted(list(self.directory_data_dict[path].funcMap.keys()))
+                else:
+                    dir_func_vector_header = [i for i in range(self.directory_data_dict[path].get_data()).shape[1]]
+                if not self.func_vector_header:
+                    self.func_vector_header = dir_func_vector_header
+                else:
+                    assert dir_func_vector_header == self.func_vector_header, "Inconsistant funcVectorHeader:\n{}\nvs\n{}".format(self.func_vector_header, dir_func_vector_header)
+
+
         # zero init train & test set + labels
         self.train_set = np.zeros(0)
         self.valid_set = np.zeros(0)
@@ -433,7 +416,8 @@ class FuncDataset(data.Dataset):
         # init full data
         data_list = []
         for directory_data in self.directory_data_dict.values():
-            data_list.append(directory_data.get_data())
+            if directory_data.func_data:
+                data_list.append(directory_data.get_data([]))
         self.full_data = np.concatenate(data_list)
 
         # scaler for normalisation
@@ -455,17 +439,25 @@ class FuncDataset(data.Dataset):
         self.c = len(self.classes)
         self.y = MetaContainer(self.classes)
 
-        # convert classes into numeric labels
-        self.label_encoder = preprocessing.LabelEncoder()
-        self.label_encoder.fit(self.classes)
+        # convert classes into labels
+        if convertToMultiLabels:
+            self.label_encoder = preprocessing.MultiLabelBinarizer()
+            self.label_encoder.fit([self.classes])
+        else:
+            self.label_encoder = preprocessing.LabelEncoder()
+            self.label_encoder.fit(self.classes)
 
-  #   """
-  #   cross entropy loss that takes one hot coded tensors as input
-  #   """
-  #   def __cross_entropy_one_hot(self, input, target):
-  #       _, labels = target.max(dim=0)
-  #       return nn.CrossEntropyLoss()(input, labels)
-  # #      return nn.CrossEntropyLoss()(input, target)
+        # init fastai attributes & other in self.directory_data_dict
+        for directory_data in self.directory_data_dict.values():
+            # fastai
+            directory_data.classes = self.classes
+            directory_data.c = self.c
+            directory_data.y = self.y
+
+            # other
+            directory_data.label_encoder = self.label_encoder
+            directory_data.scaler = self.scaler
+
 
     def get_classes(self, dataset_type:str='original'):
         class_dict = {}
@@ -474,7 +466,7 @@ class FuncDataset(data.Dataset):
         if dataset_type is 'original':
             for train_dir in self.directory_data_dict.values():
                 # get classes & their counts
-                dir_classes = np.unique(train_dir.get_classified_labels(), return_counts=True)
+                dir_classes = np.unique(train_dir.get_classified_labels(exclude=[]), return_counts=True)
 
                 # add to class_dict
                 for i in range(len(dir_classes[0])):
@@ -506,18 +498,18 @@ class FuncDataset(data.Dataset):
     Set test_set to the classified data of the element at position index in the key list of the directory data dict.
     All other entries are added to the train_set.
     """
-    def setLooSplit(self, index, normaliseData=True, balanceDatasets=True):
+    def setLooSplit(self, index, generateData=False, normaliseData=True, balanceDatasets=True):
         train_dirs = sorted(self.directory_data_dict.keys())
         train_dirs.remove(train_dirs[index])
         test_dirs = [sorted(self.directory_data_dict.keys())[index]]
 
-        self.setDirSplit(train_dirs, test_dirs, normaliseData, balanceDatasets)
+        self.setDirSplit(train_dirs, test_dirs, generateData, normaliseData, balanceDatasets)
 
     """ 
     Split all classified vectors & their correspnding label into train & test set based on train_dirs & test_dirs.
     All dir names in train_dirs and test_dirs should be contained in self.directory_data_dict.
     """
-    def setDirSplit(self, train_dirs: List[str], test_dirs: List[str], normaliseData=True, balanceDatasets=True):
+    def setDirSplit(self, train_dirs: List[str], test_dirs: List[str], generateData=False, normaliseData=True, balanceDatasets=True, exclude:list=[]):
         self.train_dirs = train_dirs
         self.test_dirs = test_dirs
 
@@ -530,34 +522,41 @@ class FuncDataset(data.Dataset):
                 if not self.directory_data_dict.__contains__(train_dir):
                     raise ValueError(train_dir + " is not in the directory data dict!")
 
-            train_data_list.append(self.directory_data_dict[train_dir].get_classified_data())
-            train_label_list.append(self.directory_data_dict[train_dir].get_classified_labels())
+            train_data_list.append(self.directory_data_dict[train_dir].get_classified_data(exclude))
+            train_label_list.append(self.directory_data_dict[train_dir].get_classified_labels(exclude))
 
         self.train_set = np.concatenate(train_data_list)
         self.train_classes = np.concatenate(train_label_list)
 
         # extract test dataset & labels from test_dirs
-        test_data_list = []
-        test_label_list = []
-        for test_dir in test_dirs:
-            if not self.directory_data_dict.__contains__(test_dir):
-                test_dir = self.data_dir + "/" + test_dir
+        if test_dirs:
+            test_data_list = []
+            test_label_list = []
+            for test_dir in test_dirs:
                 if not self.directory_data_dict.__contains__(test_dir):
-                    raise ValueError(test_dir + " is not in the directory data dict!")
+                    test_dir = self.data_dir + "/" + test_dir
+                    if not self.directory_data_dict.__contains__(test_dir):
+                        raise ValueError(test_dir + " is not in the directory data dict!")
 
-            test_data_list.append(self.directory_data_dict[test_dir].get_classified_data())
-            test_label_list.append(self.directory_data_dict[test_dir].get_classified_labels())
+                test_data_list.append(self.directory_data_dict[test_dir].get_classified_data(exclude))
+                test_label_list.append(self.directory_data_dict[test_dir].get_classified_labels(exclude))
 
-        self.valid_set = np.concatenate(test_data_list)
-        self.valid_classes = np.concatenate(test_label_list)
+            self.valid_set = np.concatenate(test_data_list)
+            self.valid_classes = np.concatenate(test_label_list)
+        else:
+            self.valid_set = np.ndarray((0, self.train_set.shape[1]))
+            self.valid_classes = np.ndarray((0, self.train_set.shape[1]))
 
         self.convert_class_labels()
 
-        if normaliseData:
-            self.normalise_data()
+        if generateData:
+            self.generate_data()
 
         if balanceDatasets:
             self.balance_datasets()
+
+        if normaliseData:
+            self.normalise_data()
 
     """ 
     Prepare kfold train test split
@@ -605,32 +604,93 @@ class FuncDataset(data.Dataset):
 
         self.convert_class_labels()
 
-        if normaliseData:
-            self.normalise_data()
-
         if balanceDatasets:
             self.balance_datasets()
 
+        if normaliseData:
+            self.normalise_data()
+
+    # generate data:
+    # average < 5 %: add quadrupled vector
+    # average < 20%: add doubled vector
+    # average > 5%: add halved vector
+    # average > 20% add quartered vector
+    # ignore samples labeled with no smell
+    def generate_data(self):
+        print("Generating additional data based on the data loaded...")
+        no_smell_label = self.label_encoder.transform([('No Smell',)])[0]
+
+        d_additions = []
+        l_additions = []
+        for dataset, labels in [(self.train_set, self.train_classes), (self.valid_set, self.valid_classes)]:
+            # ignore empty datasets
+            if dataset.shape[0] == 0:
+                continue
+
+            dataset_addition = np.ndarray((0, dataset.shape[1]))
+            if self.convertToMultiLabels:
+                labels_addition = torch.zeros((0, labels.shape[1]))
+            else:
+                labels_addition = torch.zeros(0)
+
+            original_size = dataset.shape[0]
+            for i in range(original_size):
+                if self.convertToMultiLabels:
+                    if (labels[i].numpy() == no_smell_label).all():
+                        continue
+                else:
+                    if labels[i] == no_smell_label:
+                        continue
+
+                if self.convertToMultiLabels:
+                    label = labels[i].reshape(1, -1)
+                else:
+                    label = labels[i]
+                labels_addition = torch.cat((labels_addition, torch.cat((label, label), dim=0)), dim=0)
+                if np.average(dataset[i]) < 5.:
+                    dataset_addition = np.vstack((dataset_addition, dataset[i] * 4.))
+                else:
+                    dataset_addition = np.vstack((dataset_addition, dataset[i] / 2.))
+                if np.average(dataset[i]) < 20.:
+                    dataset_addition = np.vstack((dataset_addition, dataset[i] * 2.))
+                else:
+                    dataset_addition = np.vstack((dataset_addition, dataset[i] / 4.))
+
+            d_additions.append(dataset_addition)
+            l_additions.append(labels_addition)
+
+        # add additions to datasets and classes
+        self.train_set = np.vstack((self.train_set, d_additions[0]))
+        if len(d_additions) > 1:
+            self.valid_set = np.vstack((self.valid_set, d_additions[1]))
+
+        self.train_classes = torch.cat((self.train_classes, l_additions[0]), dim=0)
+        if len(l_additions) > 1:
+            self.valid_classes = torch.cat((self.valid_classes, l_additions[1]), dim=0)
 
     # normalise data:
     # calculate mean & variance based on train set
     # apply normalisation to full, train and test set
     def normalise_data(self):
+        print("Normalising datasets...")
         # calc mean & variance of train set
         self.scaler.fit(self.train_set)
 
         # apply normalisation to training, test & full data
         self.train_set = self.scaler.transform(self.train_set)
-        self.valid_set = self.scaler.transform(self.valid_set)
+        if self.valid_set.shape[0] > 0:
+            self.valid_set = self.scaler.transform(self.valid_set)
 
         # full data
         data_list = []
         for directory_data in self.directory_data_dict.values():
-            data_list.append(directory_data.get_data())
+            if directory_data.func_data:
+                data_list.append(directory_data.get_data(exclude=[]))
         self.full_data = np.concatenate(data_list)
-        self.full_data = self.scaler.transform(np.concatenate(data_list))
+        self.full_data = self.scaler.transform(self.full_data)
 
     def balance_datasets(self):
+        print("Balancing datasets...")
         # balance training & test dataset:
         datasets = []
 
@@ -728,8 +788,9 @@ class FuncDataset(data.Dataset):
                 label_list.append(np.repeat(label, n_test_samples, axis=0))
 
         # update training_data & training_classes with upsampled sets
-        self.valid_set = np.concatenate(resampled_test_class_sets)
-        self.valid_classes = torch.from_numpy(np.concatenate(label_list)).float()
+        if self.valid_set.shape[0] > 0:
+            self.valid_set = np.concatenate(resampled_test_class_sets)
+            self.valid_classes = torch.from_numpy(np.concatenate(label_list)).float()
 
     def delete_class(self, classname):
         self.rename_class(classname, "")
@@ -750,10 +811,28 @@ class FuncDataset(data.Dataset):
         self.y = MetaContainer(self.classes)
 
         # convert classes into numeric labels
-        self.label_encoder = preprocessing.LabelEncoder()
-        self.label_encoder.fit(self.classes)
+        if self.convertToMultiLabels:
+            self.label_encoder.fit([self.classes])
+        else:
+            self.label_encoder.fit(self.classes)
 
         print("Renamed class \"" + old_name + "\" to \"" + new_name + "\"")
+
+    def drop_func(self, func: int):
+        '''drop func from the dataset'''
+        assert func in self.func_vector_header, "Func {} not in func-header {}".format(func, self.func_vector_header)
+
+        index = self.func_vector_header.index(func)
+        # drop funcs in directory_datas
+        for directory_data in self.directory_data_dict.values():
+            directory_data.drop_func(index)
+
+        # drop funcs from current dataset
+        if self.train_set.shape[0] > 0:
+            np.delete(self.train_set, index, axis=1)
+
+        if self.valid_set.shape[0] > 0:
+            np.delete(self.valid_set, index, axis=1)
 
     def convert_class_labels(self):
         '''convert self.train_classes & self.test_classes into tensors usable for training'''
@@ -763,28 +842,43 @@ class FuncDataset(data.Dataset):
         if not self.convertToMultiLabels:
             # convert class names into numeric labels
             self.train_classes = torch.from_numpy(self.label_encoder.transform(self.train_classes)).float()
-            self.valid_classes = torch.from_numpy(self.label_encoder.transform(self.valid_classes)).float()
+            if self.valid_classes.shape[0] > 0:
+                self.valid_classes = torch.from_numpy(self.label_encoder.transform(self.valid_classes)).float()
+            else:
+                self.valid_classes = torch.zeros(0)
         # convertToMultiLabels not set:
         # create multi-hot encoded labels
         else:
-            tensors = []
-            for class_set in [self.train_classes, self.valid_classes]:
-                tensor = torch.zeros(class_set.shape[0], self.c)
-                tensors.append(tensor)
-                for i in range(class_set.shape[0]):
-                    # split into class list from AnnotationString & convert into tensor with list of classlabels
-                    class_labels = class_set[i].split(",")
-                    # remove "No Smell" labels
-                    if "No Smell" in class_labels:
-                        class_labels.remove("No Smell")
-                    class_label_tensor = torch.LongTensor(self.label_encoder.transform(class_labels))
+            # prepare label tuples
+            for i in range(self.train_classes.shape[0]):
+                self.train_classes[i] = [self.train_classes[i]]
+            for i in range(self.valid_classes.shape[0]):
+                self.valid_classes[i] = [self.valid_classes[i]]
 
-                    # create multi-hot encoded tensor
-                    class_label_tensor.unsqueeze_(0)
-                    tensor[i] = torch.zeros(class_label_tensor.size(0), self.c).scatter(1, class_label_tensor, 1)
+            # init multiHotEncoded labels
+            train_labels = self.label_encoder.transform(self.train_classes)
+            self.train_classes = torch.from_numpy(train_labels).float()
+            valid_labels = self.label_encoder.transform(self.valid_classes)
+            self.valid_classes = torch.from_numpy(valid_labels).float()
 
-            self.train_classes = tensors[0].float()
-            self.valid_classes = tensors[1].float()
+            # tensors = []
+            # for class_set in [self.train_classes, self.valid_classes]:
+            #     tensor = torch.zeros(class_set.shape[0], self.c)
+            #     tensors.append(tensor)
+            #     for i in range(class_set.shape[0]):
+            #         # split into class list from AnnotationString & convert into tensor with list of classlabels
+            #         class_labels = class_set[i].split(",")
+            #         # remove "No Smell" labels
+            #         if "No Smell" in class_labels:
+            #             class_labels.remove("No Smell")
+            #         class_label_tensor = torch.LongTensor(self.label_encoder.transform(class_labels))
+            #
+            #         # create multi-hot encoded tensor
+            #         class_label_tensor.unsqueeze_(0)
+            #         tensor[i] = torch.zeros(class_label_tensor.size(0), self.c).scatter(1, class_label_tensor, 1)
+            #
+            # self.train_classes = tensors[0].float()
+            # self.valid_classes = tensors[1].float()
 
 
     def __len__(self):
@@ -801,6 +895,12 @@ class FuncDataset(data.Dataset):
         y = self.train_classes[index].float()
 
         return X, y
+
+    def __enter__(self):
+        return self
+
+    def set_item(self, item):
+        self.item = item
 
     def get_eval_dataset(self):
         return EvaluationDataset(self)
@@ -826,27 +926,68 @@ class FuncDataset(data.Dataset):
 
         return pca, scaler, max, min
 
-    def plot2DAnalysis(self, svm=None):
-        data_list = []
-        label_list = []
-        for directory_data in self.directory_data_dict.values():
-            data_list.append(directory_data.get_classified_data())
-            label_list.append(directory_data.get_classified_labels())
-
+    def plotPCA(self, svm=None, learn=None, axises=(0, 1), mark_valid_set=True, classList=[], whiten=False):
+        print("Plotting pca...")
+        data_list = [self.train_set, self.valid_set]
+        label_list = [self.train_classes.numpy(), self.valid_classes.numpy()]
         X = np.concatenate(data_list)
+
         try:
             X = self.scaler.transform(X)
         except: # ignore if scaler was not fitted
             pass
-        y = np.concatenate(label_list)
+
+        labels = np.concatenate(label_list).astype(dtype=int)
+        y = np.array(self.label_encoder.inverse_transform(labels)).reshape([-1,1])
+        if self.convertToMultiLabels:
+            for i in range(y.shape[0]):
+                if not y[i]:
+                    y[i, 0] = tuple(('No Smell',))
+
+        # get indexes of validation set
+        valid_index = np.zeros(y.shape[0], dtype=np.bool)
+        valid_index[self.train_classes.shape[0]:] = True
+        train_index = ~valid_index
+
+        # filter classes
+        if classList:
+            filtered_class_set = []
+            filtered_class_labels = []
+            filtered_valid_index = []
+
+            if self.convertToMultiLabels:
+                for i in range(X.shape[0]):
+                    for classname in y[i, 0]:
+                        index_added = False # make sure every index is only added once
+                        if classname in classList and not index_added:
+                            filtered_class_set.append(X[i].reshape((1, X.shape[1])))
+                            filtered_class_labels.append(y[i].reshape((1, y.shape[1])))
+                            filtered_valid_index.append(valid_index[i].reshape((1, y.shape[1])))
+                            index_added = True
+            else:
+                for classname in classList:
+                    filtered_index = y == classname
+                    filtered_class_set.append(X[filtered_index])
+                    filtered_class_labels.append(y[filtered_index])
+                    filtered_valid_index.append(valid_index[filtered_index])
+
+            X = np.concatenate(filtered_class_set)
+            y = np.concatenate(filtered_class_labels)
+            valid_index = np.concatenate(filtered_valid_index).reshape((-1))
+            train_index = ~valid_index
 
         lda = LinearDiscriminantAnalysis()
-        pca = PCA()
+        pca = PCA(whiten=whiten)
 
-        color_list = plt.get_cmap('tab10').colors
+        # color_map = plt.cm.get_cmap('viridis')
+        color_map = plt.cm.get_cmap('gist_rainbow')
+
+#        color_list = plt.get_cmap(color_map).colors
 
         # methods used
-        dim_reduction_methods = [('Linear Discriminant Analysis', lda), ('Principal Component Analysis', pca)]
+        # dim_reduction_methods = [('Linear Discriminant Analysis', lda), ('Principal Component Analysis', pca)]
+        dim_reduction_methods = [('Principal Component Analysis', pca)]
+
 
         # plt.figure()
         for i, (name, model) in enumerate(dim_reduction_methods):
@@ -856,7 +997,7 @@ class FuncDataset(data.Dataset):
             # plt.subplot(1, 3, i + 1, aspect=1)
 
             # Fit the method's model
-            model.fit(X, y)
+            model.fit(X[train_index], y[train_index])
             print(name)
             print("Explained variance: " + str(model.explained_variance_ratio_))
             if name == 'Linear Discriminant Analysis':
@@ -870,27 +1011,206 @@ class FuncDataset(data.Dataset):
             # Embed the data set in 2 dimensions using the fitted model
             X_embedded = model.transform(X)
 
-            if svm is not None:
-                X_support = model.transform(self.train_set)[svm.support_]
-                y_support = self.label_encoder.inverse_transform(self.train_classes[svm.support_])
+#            if svm is not None:
+#                X_support = model.transform(self.train_set)[svm.support_]
+#                y_support = self.label_encoder.inverse_transform(self.train_classes[svm.support_])
+
+            if not classList:
+                classList = self.label_encoder.classes_
+                if self.convertToMultiLabels:
+                    classList = np.append(classList, ['No Smell'])
 
             # Plot the projected points and show the evaluation score
-            for i, c in enumerate(self.label_encoder.classes_):
-                scatterAx.scatter(X_embedded[y == c, 0], X_embedded[y == c, 1],
-                                  label=c, color=color_list[i], s=6)
+            # Z = np.zeros((y.shape[0], 1), dtype=np.int)
+            # Z[y == 'No Smell'] = np.full((y[y == 'No Smell'].shape[0], 1), fill_value=classes.size-1, dtype=np.int)
+            # Z[y != 'No Smell'] = self.label_encoder.transform(y[y != 'No Smell']).reshape((y[y != 'No Smell'].shape[0], 1))
 
-                if svm is not None:
-                    scatterAx.scatter(X_support[y_support == c, 0], X_support[y_support == c, 1],
-                                      s=6, color=color_list[i], edgecolors='black', zorder=20)
+            #for l in np.unique(y):
+            #    scatterAx.plot(X_embedded[y==l, axises[0]], X_embedded[y==l, axises[1]],  c=Z[y==l], cmap=color_map, label=l)
+            for i, label in enumerate(classList):
+                # construct class index
+                if self.convertToMultiLabels:
+                    classindex = np.zeros((y.shape[0],), dtype=np.bool)
+                    for index in range(y.shape[0]):
+                        classindex[index] = label in y[index, 0]
+                else:
+                    classindex = (y == label).ravel()
 
-            scatterAx.legend(loc='best', shadow=False, scatterpoints=1)
-            scatterAx.set_title("{}".format(name))
+                color_index = (i+1)*color_map.N//(len(classList))
+                scatterAx.scatter(X_embedded[classindex & train_index, axises[0]], X_embedded[classindex & train_index, axises[1]],
+                                  label=label, c=np.array([list(color_map(color_index))]), s=10, edgecolors='none', zorder=10)
+
+                # add markers for validation set
+                if mark_valid_set:
+                    scatterAx.scatter(X_embedded[classindex & valid_index, axises[0]], X_embedded[classindex & valid_index, axises[1]],
+                                     s=10, c=np.array([list(color_map(color_index))]),edgecolors= (0., 0., 0., 0.5), zorder=20)
+
+            # create decision surface
+            if svm is not None:
+                plot_helpers.plot_contours(scatterAx, svm=svm, pca=model, cmap=color_map, alpha=0.15, axises=axises)
+            elif learn is not None:
+                plot_helpers.plot_contours(scatterAx, learner=learn, pca=model, cmap=color_map, alpha=0.3, axises=axises)
+
+
+            legend = scatterAx.legend(loc='best', shadow=False, scatterpoints=1)
+            for handle in legend.legendHandles:
+                handle._sizes = [70]
+            # scatterAx.set_title("{}".format(name))
+
+            scatterAx.set_xlabel('principal component {}'.format(axises[0]))
+            scatterAx.set_ylabel('principal component {}'.format(axises[1]))
+
 
             # cumulatedAx.plot(np.cumsum(model.explained_variance_ratio_))
             # cumulatedAx.set_xlabel('Number of Components')
             # cumulatedAx.set_ylabel('Variance (%)')  # for each component
 
         plt.show()
+
+        return dim_reduction_methods
+
+    def plotLDA(self, svm=None, learn=None, axises=(0, 1), mark_valid_set=True, classList=[], whiten=False):
+        print("Plotting lda...")
+        data_list = [self.train_set, self.valid_set]
+        label_list = [self.train_classes.numpy(), self.valid_classes.numpy()]
+
+
+        X = np.concatenate(data_list)
+
+        try:
+            X = self.scaler.transform(X)
+        except:  # ignore if scaler was not fitted
+            pass
+
+        labels = np.concatenate(label_list).astype(dtype=int)
+        y = np.array(self.label_encoder.inverse_transform(labels)).reshape([-1, 1])
+
+        if self.convertToMultiLabels:
+            for i in range(y.shape[0]):
+                if not y[i]:
+                    y[i, 0] = tuple(('No Smell',))
+
+        # get indexes of validation set
+        valid_index = np.zeros(y.shape[0], dtype=np.bool)
+        valid_index[self.train_classes.shape[0]:] = True
+        train_index = ~valid_index
+
+        # filter classes
+        if classList:
+            filtered_class_set = []
+            filtered_class_labels = []
+            filtered_valid_index = []
+
+            if self.convertToMultiLabels:
+                for i in range(X.shape[0]):
+                    for classname in y[i, 0]:
+                        index_added = False  # make sure every index is only added once
+                        if classname in classList and not index_added:
+                            filtered_class_set.append(X[i].reshape((1, X.shape[1])))
+                            filtered_class_labels.append(y[i].reshape((1, y.shape[1])))
+                            filtered_valid_index.append(valid_index[i].reshape((1, y.shape[1])))
+                            index_added = True
+            else:
+                for classname in classList:
+                    filtered_index = y == classname
+                    filtered_class_set.append(X[filtered_index])
+                    filtered_class_labels.append(y[filtered_index])
+                    filtered_valid_index.append(valid_index[filtered_index])
+
+            X = np.concatenate(filtered_class_set)
+            y = np.concatenate(filtered_class_labels)
+            valid_index = np.concatenate(filtered_valid_index).reshape((-1))
+            train_index = ~valid_index
+
+        lda = LinearDiscriminantAnalysis()
+        # pca = PCA(whiten=whiten)
+
+        # color_map = plt.cm.get_cmap('viridis')
+        color_map = plt.cm.get_cmap('gist_rainbow')
+
+        #        color_list = plt.get_cmap(color_map).colors
+
+        # methods used
+        dim_reduction_methods = [('Linear Discriminant Analysis', lda)]
+        # dim_reduction_methods = [('Principal Component Analysis', pca)]
+
+        # plt.figure()
+        for i, (name, model) in enumerate(dim_reduction_methods):
+            fig = plt.figure()
+            scatterAx = fig.add_subplot(1, 1, 1)
+            # cumulatedAx = fig.add_subplot(1, 2, 2)
+            # plt.subplot(1, 3, i + 1, aspect=1)
+
+            # Fit the method's model
+            model.fit(X[train_index], y[train_index])
+            print(name)
+            print("Explained variance: " + str(model.explained_variance_ratio_))
+            if name == 'Linear Discriminant Analysis':
+                components = model.coef_
+
+            # Embed the data set in 2 dimensions using the fitted model
+            X_embedded = model.transform(X)
+
+            #            if svm is not None:
+            #                X_support = model.transform(self.train_set)[svm.support_]
+            #                y_support = self.label_encoder.inverse_transform(self.train_classes[svm.support_])
+
+            if not classList:
+                classList = self.label_encoder.classes_
+                if self.convertToMultiLabels:
+                    classList = np.append(classList, ['No Smell'])
+
+            # Plot the projected points and show the evaluation score
+            # Z = np.zeros((y.shape[0], 1), dtype=np.int)
+            # Z[y == 'No Smell'] = np.full((y[y == 'No Smell'].shape[0], 1), fill_value=classes.size-1, dtype=np.int)
+            # Z[y != 'No Smell'] = self.label_encoder.transform(y[y != 'No Smell']).reshape((y[y != 'No Smell'].shape[0], 1))
+
+            # for l in np.unique(y):
+            #    scatterAx.plot(X_embedded[y==l, axises[0]], X_embedded[y==l, axises[1]],  c=Z[y==l], cmap=color_map, label=l)
+            for i, label in enumerate(classList):
+                # construct class index
+                if self.convertToMultiLabels:
+                    classindex = np.zeros((y.shape[0],), dtype=np.bool)
+                    for index in range(y.shape[0]):
+                        classindex[index] = label in y[index, 0]
+                else:
+                    classindex = (y == label).ravel()
+
+                color_index = (i + 1) * color_map.N // (len(classList))
+                scatterAx.scatter(X_embedded[classindex & train_index, axises[0]],
+                                  X_embedded[classindex & train_index, axises[1]],
+                                  label=label, c=np.array([list(color_map(color_index))]), s=10, edgecolors='none',
+                                  zorder=10)
+
+                # add markers for validation set
+                if mark_valid_set:
+                    scatterAx.scatter(X_embedded[classindex & valid_index, axises[0]],
+                                      X_embedded[classindex & valid_index, axises[1]],
+                                      s=10, c=np.array([list(color_map(color_index))]),
+                                      edgecolors=(0., 0., 0., 0.5), zorder=20)
+
+            # create decision surface
+            if svm is not None:
+                plot_helpers.plot_contours(scatterAx, svm=svm, pca=model, cmap=color_map, alpha=0.15, axises=axises)
+            elif learn is not None:
+                plot_helpers.plot_contours(scatterAx, learner=learn, pca=model, cmap=color_map, alpha=0.3,
+                                           axises=axises)
+
+            legend = scatterAx.legend(loc='best', shadow=False, scatterpoints=1)
+            for handle in legend.legendHandles:
+                handle._sizes = [70]
+            # scatterAx.set_title("{}".format(name))
+
+            scatterAx.set_xlabel('principal component {}'.format(axises[0]))
+            scatterAx.set_ylabel('principal component {}'.format(axises[1]))
+
+            # cumulatedAx.plot(np.cumsum(model.explained_variance_ratio_))
+            # cumulatedAx.set_xlabel('Number of Components')
+            # cumulatedAx.set_ylabel('Variance (%)')  # for each component
+
+        plt.show()
+
+        return dim_reduction_methods
 
     def getPCA(self):
         data_list = []
@@ -1024,10 +1344,10 @@ class FuncDataset(data.Dataset):
 
         cmap_name = "YlGn"
 
-        im, cbar = heatmap(corr.to_numpy(), [str(i) for i in range(corr.shape[0])], [str(i) for i in range(corr.shape[0])], ax=ax,
+        im, cbar = plot_helpers.heatmap(corr.to_numpy(), [str(i) for i in range(corr.shape[0])], [str(i) for i in range(corr.shape[0])], ax=ax,
                            cmap=cmap_name, cbarlabel="Correlation coefficient")
         if corr.shape[0] < 16:
-            texts = annotate_heatmap(im, valfmt="{x:.3f}")
+            texts = plot_helpers.annotate_heatmap(im, valfmt="{x:.3f}")
 
         fig.suptitle("Correlation Matrix of " + ", ".join(classlist))
         # fig.tight_layout()
@@ -1045,22 +1365,28 @@ class FuncDataset(data.Dataset):
 
         cmap_name = "YlGn"
 
-        im, cbar = heatmap(r2.to_numpy(), [str(i) for i in range(r2.shape[0])],
+        im, cbar = plot_helpers.heatmap(r2.to_numpy(), [str(i) for i in range(r2.shape[0])],
                            [str(i) for i in range(r2.shape[0])], ax=ax,
                            cmap=cmap_name, cbarlabel="R2 value")
         if r2.shape[0] < 16:
-            texts = annotate_heatmap(im, valfmt="{x:.3f}")
+            texts = plot_helpers.annotate_heatmap(im, valfmt="{x:.3f}")
 
         fig.suptitle("R2 Matrix of " + ", ".join(classlist))
         # fig.tight_layout()
         plt.show()
 
     def plot_func_relationships(self, fixed_func: int, classlist: list = None):
+        print ("Plotting functionalisation crossplot...")
         if classlist is None:
             classlist = self.classes
 
+            if self.convertToMultiLabels:
+                classlist.append('No Smell')
+
+
         # prepare data
-        X = np.concatenate([self.train_set, self.valid_set])
+        X = np.concatenate([self.train_set, self.valid_set.reshape((-1, self.train_set.shape[1]))])
+        # y = np.concatenate([self.train_classes, self.valid_classes.reshape((-1))])
         y = np.concatenate([self.train_classes, self.valid_classes])
 
         # start plotting
@@ -1075,13 +1401,14 @@ class FuncDataset(data.Dataset):
         for func in range(self.train_set.shape[1]):
             ax = axes[math.floor(func / plots_per_row), func % plots_per_row]
             ax.set_title(str(fixed_func) + " vs " + str(func))
-            for classname in classlist:
-                classlabel = self.label_encoder.transform([classname])[0]
 
+            for classname in classlist:
                 if self.convertToMultiLabels:
-                    indexes = np.array(y[:, classlabel], dtype=bool)
+                    label = self.label_encoder.transform([[classname]])
+                    indexes = (y == label).all(axis=1)
                 else:
-                    indexes = y == classname
+                    label = self.label_encoder.transform(classname)
+                    indexes = y == label
 
                 ax.scatter(X[indexes, fixed_func], X[indexes, func], label=classname)
 
@@ -1144,6 +1471,8 @@ class EvaluationDataset:
         self.c = dataset.c
         self.loss_func = dataset.loss_func
 
+        self.item = None
+
     def __len__(self):
         'Denotes the total number of samples'
         return len(self.dataset.valid_set)
@@ -1153,11 +1482,23 @@ class EvaluationDataset:
         # Select sample
         ID = str(index)
 
-        # Load data and get label
-        X = torch.from_numpy(self.dataset.valid_set[index, :]).float()
-        y = self.dataset.valid_classes[index].float()
+        if self.item is None:
+            # Load data and get label
+            X = torch.from_numpy(self.dataset.valid_set[index, :]).float()
+            y = self.dataset.valid_classes[index].float()
 
-        return X, y
+            return X, y
+        else:
+            item = self.item
+            self.item = None
+
+            return item, None
+
+    def __enter__(self):
+        return self
+
+    def set_item(self, item):
+        self.item = item
 
 class MeasIterator:
     """
@@ -1239,13 +1580,44 @@ class MeasIterator:
 
 if __name__ == "__main__":
     merge_eth_ipa_ac = False
+    drop_funcs = False
+    generate = False
     balance = False
-    normalise = False
-    dataset = FuncDataset(data_dir='data/eNose-base-dataset',
+    normalise = True
+    dataset = FuncDataset(data_dir='data/eNose-dt-showcase',
                           convertToRelativeVectors=True, calculateFuncVectors=True,
                           convertToMultiLabels=True)
     if merge_eth_ipa_ac:
         dataset.rename_class("Aceton", "Eth IPA Ac")
         dataset.rename_class("Ethanol", "Eth IPA Ac")
         dataset.rename_class("Isopropanol", "Eth IPA Ac")
-    dataset.setDirSplit(["train"], ["validate"], normaliseData=normalise, balanceDatasets=balance)
+    if drop_funcs:
+        dataset.drop_func(7)
+        dataset.drop_func(4)
+        dataset.drop_func(3)
+
+    dataset.setDirSplit(["train"], [], normaliseData=normalise, balanceDatasets=balance)
+    # dataset.setDirSplit(["train"], ["validate"], normaliseData=normalise, balanceDatasets=balance)
+    # dataset.setDirSplit(["reference"], [], generateData=generate, normaliseData=normalise, balanceDatasets=balance)
+    # dataset.setDirSplit(["4_1_7-4_1_10"], [], generateData=generate, normaliseData=normalise, balanceDatasets=balance)
+
+    from sklearn.multiclass import OneVsRestClassifier
+    from sklearn import svm
+    svc = OneVsRestClassifier(svm.SVC(C=1000000, kernel='rbf', probability=False))
+    svc.fit(dataset.train_set, dataset.train_classes)
+
+    from sklearn.metrics import fbeta_score, precision_score, recall_score, hamming_loss, roc_auc_score, accuracy_score
+    #print(fbeta_score(dataset.valid_classes.numpy(), svc.predict(dataset.valid_set), average='macro', beta=3.))
+
+    y_true = dataset.valid_classes.numpy()
+    if dataset.valid_set.shape[0] > 0:
+        y_pred = svc.predict(dataset.valid_set)
+        preds = svc.predict_proba(dataset.valid_set)
+        print('fbeta_score: {}'.format(fbeta_score(y_true, y_pred, average='macro', beta=3.)))
+        print('precision_score: {}'.format(precision_score(y_true, y_pred, average='macro')))
+        print('recall_score: {}'.format(recall_score(y_true, y_pred, average='macro')))
+        print('hamming_loss: {}'.format(hamming_loss(y_true, y_pred)))
+        print('auc: {}'.format(roc_auc_score(y_true, preds)))
+        print('Accuracy: {}'.format(accuracy_score(y_true, y_pred)))
+
+    dataset.plot_func_relationships(0)
