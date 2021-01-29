@@ -204,11 +204,11 @@ class FunctionalisationAnalyser:
 
 
 if __name__ == "__main__":
-    merge_eth_ipa_ac = False
+    merge_eth_ipa_ac = True
     generate = True
     balance = False
     normalise = True
-    dataset = FuncDataset(data_dir='data/eNose-dt-showcase',
+    dataset = FuncDataset(data_dir='data/eNose-base-dataset',
                           convertToRelativeVectors=True, calculateFuncVectors=True,
                           convertToMultiLabels=False)
     if merge_eth_ipa_ac:
